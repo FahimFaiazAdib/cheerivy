@@ -15,7 +15,13 @@ main.elf: main.c
 flash: main.hex
 	avrdude -c usbasp -p m32 -U flash:w:main.hex:i
 
+# Test build: camera AI only (no Mirror AI fallback, no two-player mode).
+camera-only: main.c
+	avr-gcc $(CFLAGS) -DMIRROR_AI=0 -DALLOW_2P=0 -o camera_only.elf main.c
+	avr-objcopy -O ihex -R .eeprom camera_only.elf CHEERIVY_camera_only.hex
+	avr-size --mcu=$(MCU) -C camera_only.elf
+
 clean:
 	rm -f main.elf main.hex
 
-.PHONY: flash clean
+.PHONY: flash clean camera-only

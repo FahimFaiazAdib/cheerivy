@@ -62,6 +62,15 @@
                                         and waits instead of driving on a stale command */
 #define MIRROR_SIGN            (+1)  /* set to -1 if Mirror AI moves OPPOSITE to the human */
 #define P2_DIR_SIGN            (+1)  /* set to -1 if player 2's carriage moves opposite to their joystick */
+/* Build switches (the Makefile's `camera-only` target builds CHEERIVY_camera_only.hex with both 0):
+   MIRROR_AI 0 -> no Mirror AI: without the laptop's camera AI the AI carriage just stops, so
+                  everything it does comes from the camera.   ALLOW_2P 0 -> single player only. */
+#ifndef MIRROR_AI
+#define MIRROR_AI              1
+#endif
+#ifndef ALLOW_2P
+#define ALLOW_2P               1
+#endif
 #define MIRROR_FIRE_DELAY_MS   550   /* ~ball travel time from human flipper to AI */
 #define TELEMETRY_MS           1000
 #define GOAL_LOCKOUT_MS        1500  /* ignore the same beam this long after a goal (ball bouncing in the beam) */
@@ -340,7 +349,7 @@ static void mirror_record(uint32_t now, int8_t human_dir) {
   mirror_head = (mirror_head + 1) % MIRROR_SLOTS;
 }
 
-static int8_t mirror_dir(uint8_t level) {
+__attribute__((unused)) static int8_t mirror_dir(uint8_t level) {
   uint8_t back = MIRROR_DELAY_MS[level] / 10;
   uint8_t i = (mirror_head + MIRROR_SLOTS - 1 - back) % MIRROR_SLOTS;
   return MIRROR_SIGN * mirror_buf[i];
@@ -430,7 +439,7 @@ static uint8_t lobby(void) {
     }
     if (rx_kick) {
       rx_kick = 0;
-      return rx_game == 2 ? 2 : 1;
+      return (ALLOW_2P && rx_game == 2) ? 2 : 1;
     }
     uint8_t down = freeze_btn_down();
     if (down && !was_down) {
@@ -503,7 +512,7 @@ static void play_match(uint8_t game, uint8_t level) {
       link_up = link_now;
       if (game == 1) {                  /* in 2P nobody cares which AI would be playing */
         PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
-        uart_puts(link_up ? "MODE CAMERA\n" : "MODE MIRROR\n");
+        uart_puts(link_up ? "MODE CAMERA\n" : (MIRROR_AI ? "MODE MIRROR\n" : "MODE WAIT\n"));
       }
     }
 
@@ -535,11 +544,16 @@ static void play_match(uint8_t game, uint8_t level) {
         }
         mirror_fire_at = 0;
       } else {
+#if MIRROR_AI
         ai_dir = mirror_dir(level);
         if (mirror_fire_at && now >= mirror_fire_at) {
           mirror_fire_at = 0;
           servo_fire(SERVO_AI, now);
         }
+#else
+        ai_dir = 0;                     /* camera-only test build: no camera AI -> stand still */
+        mirror_fire_at = 0;
+#endif
       }
     } else {
       rx_fire = rx_freeze = 0;          /* frozen: ignore queued actions */
@@ -569,7 +583,7 @@ static void play_match(uint8_t game, uint8_t level) {
       next_telemetry = now + TELEMETRY_MS;
       uart_puts("T ");
       uart_putu(left);
-      uart_puts(game == 2 ? " P2\n" : link_up ? " CAM\n" : " MIR\n");
+      uart_puts(game == 2 ? " P2\n" : link_up ? " CAM\n" : (MIRROR_AI ? " MIR\n" : " WAIT\n"));
     }
   }
 
