@@ -2,7 +2,7 @@
 B2 — Arena calibration (two steps, one-time, redo with 'c' if the phone moves).
 
 Step 1 — click the 4 inner corners of the two STRAIGHT BASELINE walls:
-    first the 2 corners of the wall behind the RED (AI) carriage, any order,
+    first the 2 corners of the wall behind the AI carriage (the taped one), any order,
     then the 2 corners of the other end wall, any order.
   These are a real rectangle BASE_W x ARENA_H cm, so every pixel -> centimetres.
   The camera can be at any angle / rotation; the order is sorted out automatically.
@@ -21,7 +21,7 @@ import numpy as np
 import config as C
 from arena import Arena, default_polygon
 
-ORDER = ["a corner of the wall behind the RED carriage", "the OTHER corner of that wall",
+ORDER = ["a corner of the wall behind the AI (taped) carriage", "the OTHER corner of that wall",
          "a corner of the far end wall (your side)", "the OTHER corner of the far end wall"]
 SNAPSHOT = "snapshot.jpg"
 

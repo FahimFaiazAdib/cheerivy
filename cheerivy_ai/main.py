@@ -11,7 +11,8 @@ CHEERIVY — Vision AI (Layer B)
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
-Mouse: click the red tape on the right-hand (top-down) view to lock its colour.
+Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
+       RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
 
 Live show window (see show/TARGET.md):
        connecting screen (waits for the robot; s = play without it) -> 1 / 2 choose single or
@@ -107,10 +108,13 @@ def main():
     flat_holder = {}
 
     def on_mouse(event, x, y, *_):
-        if event == cv2.EVENT_LBUTTONDOWN and "img" in flat_holder:
+        if event in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN) and "img" in flat_holder:
             ox = flat_holder["offset_x"]
             if x >= ox and y < flat_holder["img"].shape[0]:
-                tracker.sample_red(flat_holder["img"], x - ox, y)
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    tracker.sample_carriage(flat_holder["img"], x - ox, y)
+                else:
+                    tracker.sample_ball(flat_holder["img"], x - ox, y)
 
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()

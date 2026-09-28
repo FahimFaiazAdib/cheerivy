@@ -63,7 +63,7 @@ class Controller:
             self.target, self._pending = desired, None
 
         if carriage_x is None:
-            return "S", False, "CARRIAGE NOT SEEN (click the red tape)"
+            return "S", False, "CARRIAGE NOT SEEN (left-click the carriage tape)"
 
         err = self.target - carriage_x
         band = C.DEADBAND_CM if self.moving != "S" else C.DEADBAND_CM + C.HYSTERESIS_CM

@@ -15,7 +15,7 @@ To rebuild after changing `main.c`: `make`, then copy `main.hex` to `CHEERIVY.he
 
 ## Hardware (v5)
 
-| | Human | AI (red tape on carriage) |
+| | Human | AI (green note on the carriage) |
 |---|---|---|
 | Control | Joystick X pin 39, Y pin 37, button pin 2 | Laptop camera via HC-05 (pin 14), or Mirror AI when the laptop is silent |
 | Motor | TB6612 channel B (pins 24, 25, 26) | TB6612 channel A (pins 22, 23, 20) |
@@ -65,3 +65,10 @@ Install the packages with `python3 -m pip install -r cheerivy_ai/requirements.tx
   *Device Manager → Ports (COM & LPT)* ("Standard Serial over Bluetooth link", the **outgoing** one) and run
   `python main.py --port COM5` with your number.
 - **Voice:** the commentary uses the built-in Windows voice.
+
+### Ball and carriage colours
+
+The tracker looks for an **orange ball** and a **green (tia) note on the AI carriage**; change
+`BALL_COLOR` / `CARRIAGE_COLOR` in `cheerivy_ai/config.py` for other colours (black ball: `"black"`).
+In the right-hand (top-down) view: **left-click the carriage note** and **right-click the ball** to fine-tune
+the colours to your lighting.

@@ -34,15 +34,29 @@ PX_PER_CM = 10          # resolution of the top-down (warped) image
 CAMERA_INDEX = 0        # 0 = Iriun on this Mac (1 = FaceTime). None = auto-pick
 CAMERA_W, CAMERA_H = 1280, 720
 
+# ---------------------------------------------------------------- colours
+# Pick colours far apart on the colour wheel: orange ball + green (tia) carriage never get mixed up.
+# Fine-tune live in the top-down view: LEFT-click the carriage tape, RIGHT-click the ball.
+BALL_COLOR = "orange"       # "orange", "black", or any name in COLORS
+CARRIAGE_COLOR = "green"    # "green", "blue" or "red"
+# HSV ranges (OpenCV: hue 0-180, saturation and value 0-255). "black" = dark pixels instead.
+COLORS = {
+    "orange": [((5, 110, 110), (25, 255, 255))],
+    "green":  [((35, 70, 60), (85, 255, 255))],
+    "blue":   [((90, 80, 50), (130, 255, 255))],
+    "red":    [((0, 90, 70), (10, 255, 255)), ((165, 90, 70), (180, 255, 255))],
+    "black":  None,
+}
+
 # ---------------------------------------------------------------- ball detection
-BALL_MAX_V = 80         # HSV "value" below this counts as black
+BALL_MAX_V = 80         # black ball only: HSV "value" below this counts as black
 BALL_MIN_AREA_CM2 = 5.0      # 4 cm ball = 12.6 cm² from above
 BALL_MAX_AREA_CM2 = 20.0
 BALL_MIN_CIRCULARITY = 0.55
 BALL_MAX_JUMP_CM = 25.0 # ignore detections that teleport further than this in one frame
 
 # ---------------------------------------------------------------- carriage detection
-CARRIAGE_BAND_CM = CARRIAGE_DEPTH + 8.0  # search for red tape this close to the AI baseline
+CARRIAGE_BAND_CM = CARRIAGE_DEPTH + 8.0  # search for the carriage tape this close to the AI baseline
                                          # (generous: tape sits ABOVE the floor, so an angled camera shifts it)
 CARRIAGE_MIN_AREA_CM2 = 1.0
 CARRIAGE_MASK_MARGIN = 1.5  # hide carriage footprint (+ this) from the ball detector

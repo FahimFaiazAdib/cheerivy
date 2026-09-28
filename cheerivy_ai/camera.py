@@ -4,7 +4,7 @@ B1 — Frame sources.
   Camera    : phone via Continuity Camera (iPhone) or DroidCam/Iriun USB (Android).
               A background thread always keeps only the NEWEST frame, so we never
               process stale, buffered video (that is where most lag comes from).
-  SimArena  : a fake top-down arena with a bouncing black ball and a red carriage
+  SimArena  : a fake top-down arena with a bouncing ball and a taped AI carriage
               that obeys the L/R/S commands — test everything with no hardware.
 """
 import random
@@ -80,10 +80,15 @@ class Camera:
         self.cap.release()
 
 
+# How the simulator paints each config colour (BGR).
+SIM_BGR = {"orange": (20, 130, 245), "green": (60, 210, 90), "blue": (210, 110, 30),
+           "red": (40, 40, 210), "black": (20, 20, 20)}
+
+
 class SimArena:
     """
     Fake phone view of the real octagonal board (see photoOfBoard.jpeg): white floor,
-    cream walls, steel rods, white carriages with black servos, red tape on the AI
+    cream walls, steel rods, white carriages with black servos, coloured tape on the AI
     carriage, black wires lying on the table outside. Seen slightly off-angle.
     """
     MARGIN = 70
@@ -145,9 +150,9 @@ class SimArena:
         cv2.rectangle(img, (x0, y0), (x1, y1), (200, 220, 230), -1)
         cv2.rectangle(img, (x0, y0), (x1, y1), (150, 170, 180), 2)
         cv2.rectangle(img, (x0 + 10, y0 + 12), (x0 + 30, y1 - 12), (20, 20, 20), -1)   # black drive wheel
-        if red:                                                                          # red tape, centred
+        if red:                                                        # coloured tape (config.CARRIAGE_COLOR), centred
             xc = (x0 + x1) // 2
-            cv2.rectangle(img, (xc - 15, y0 + 10), (xc + 15, y1 - 10), (40, 40, 210), -1)
+            cv2.rectangle(img, (xc - 15, y0 + 10), (xc + 15, y1 - 10), SIM_BGR[C.CARRIAGE_COLOR], -1)
 
     def _serve(self):
         self.bx = random.uniform(C.X0 + 4, C.X0 + C.BASE_W - 4)
@@ -209,7 +214,7 @@ class SimArena:
         flat = self.background.copy()
         self._draw_carriage(flat, self.carriage_x, top=True, red=True)
         self._draw_carriage(flat, C.X0 + C.BASE_W / 2, top=False, red=False)
-        cv2.circle(flat, (int(self.bx * s), int(self.by * s)), int(C.BALL_RADIUS * s), (20, 20, 20), -1)
+        cv2.circle(flat, (int(self.bx * s), int(self.by * s)), int(C.BALL_RADIUS * s), SIM_BGR[C.BALL_COLOR], -1)
         frame = np.full((self.img_h, self.img_w, 3), (40, 50, 70), np.uint8)
         cv2.warpPerspective(flat, self.M, (self.img_w, self.img_h), dst=frame, borderMode=cv2.BORDER_TRANSPARENT)
         frame = cv2.add(frame, np.random.randint(0, 12, frame.shape, np.uint8))
