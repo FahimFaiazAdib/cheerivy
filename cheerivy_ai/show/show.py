@@ -47,6 +47,12 @@ CONNECT, MENU, NAMES, WAITING, LIVE, RESULTS = "CONNECT", "MENU", "NAMES", "WAIT
 READY_FRESH_S = 3.0        # a "READY" newer than this = the robot is in its lobby and listening
 GOAL_ANIM_S = 3.2
 MAX_REEL = 6               # goals shown in the highlight reel
+CHAT_GAP_S = 4.0      # in-play lines: at most one every this many seconds
+CHAT_BIG_GAP_S = 1.5  #   ... but a milestone (5-touch rally, 3 saves) only needs this gap
+CHAT_SHOT_P = 0.35    # chance of a build-up line ("Here it comes!") on a new shot
+CHAT_LOST_S = 2.5     # ball out of sight this long -> "Where is it?"
+CHAT_REST_S = 6.0     # ball resting this long -> a quiet line ("A moment to breathe.")
+CHAT_REPLY_S = 10.0   # a goal this soon after conceding one -> "The reply! Instant!"
 END_GRACE_S = 4.0          # clock hit 0 but no END line -> end the match ourselves
 
 
@@ -139,6 +145,10 @@ class Show:
         self.bursts = []
         self.pip = None                 # instant replay picture-in-picture
         self.said = set()
+        now = time.time()
+        # in-play commentary (voice bank): what has already been talked about
+        self.chat = {"t": now, "shots": 0, "saves": 0, "rally": 0, "seen": now, "lost": False,
+                     "rest": None, "rest_said": False, "vx": 0.0, "saves_at_goal": 0}
         self.results = None
         self.result_row = None
         self.ended_at = None
@@ -328,6 +338,8 @@ class Show:
         now = time.time()
         self.score[who] += 1
         speed = self.stats.shot_speed(now)
+        saves_since = self.stats.ai_saves - self.chat["saves_at_goal"]
+        self.chat["saves_at_goal"] = self.stats.ai_saves
         self.stats.goal_scored()
         g = {"n": len(self.goals) + 1, "who": who, "name": self.name_of(who), "t": now,
              "clock": self._clock(now), "elapsed": now - (self.match_start or now),
@@ -350,6 +362,11 @@ class Show:
             history = [x["score"] for x in self.goals[:-1]]
             payoff, tail = self.bank.goal(self.game, who, (self.score["H"], self.score["A"]), self.name_of(who),
                                           self._fb(who), g["clock"], history)
+            prev = self.goals[-2] if len(self.goals) >= 2 else None
+            if prev and prev["who"] != who and now - prev["t"] < CHAT_REPLY_S:
+                payoff = payoff + self.bank.exact("cb_reply")          # straight back after conceding
+            elif who == "H" and saves_since >= 3:
+                payoff = payoff + self.bank.exact("cb_break")          # the wall finally breaks
             self.voice.play(payoff, priority=1, max_age=5, interrupt=True)
             self.voice.play(tail, priority=2, max_age=10)
             if speed >= L.FAST_SPEED:
@@ -502,6 +519,7 @@ class Show:
             return
         left = self._clock(now)
         if self.bank.ok:
+            self._chatter(now)
             if left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
                 self.said.add("60")
                 self.voice.play(self.bank.exact("clk_60"), priority=4, max_age=3)
@@ -525,6 +543,61 @@ class Show:
                            priority=3, max_age=3)
         if left <= 0 and self.clock_sync and now - self.clock_sync[1] > self.clock_sync[0] + END_GRACE_S:
             self.end_match()
+
+    def _chatter(self, now):
+        """Short in-play lines from the voice bank: shots, saves, rallies, wall bounces, a lost
+        ball, a quiet moment. At most one every CHAT_GAP_S, never over a goal call, and dropped
+        if the voice is still busy (max_age) so it never lags behind the play."""
+        c, st = self.chat, self.stats
+        tele = self.tele or {}
+        ball = tele.get("ball")
+        shots = st.shots["H"] + st.shots["A"]
+        new_shot = shots > c["shots"]
+        shooter = None
+        if new_shot:
+            shooter = "A" if st.shots["A"] > self.chat.get("shots_a", 0) else "H"
+        c["shots_a"] = st.shots["A"]
+        vx = tele.get("vx", 0.0) or 0.0
+        bounced = (ball is not None and abs(vx) > 20 and abs(c["vx"]) > 20 and vx * c["vx"] < 0
+                   and not C.X0 + 4 < ball[0] < C.X0 + C.BASE_W - 4)
+        c["vx"] = vx if ball is not None else 0.0
+
+        line, big = None, False       # big = a milestone: allowed sooner after the last line
+        if ball is not None:
+            c["seen"], c["lost"] = now, False
+            speed = math.hypot(tele.get("vx", 0.0) or 0.0, tele.get("vy", 0.0) or 0.0)
+            if speed > 4:
+                c["rest"], c["rest_said"] = None, False
+            elif c["rest"] is None:
+                c["rest"] = now
+        goal_just_now = self.goals and now - self.goals[-1]["t"] < 7
+
+        if st.ai_saves > c["saves"] and st.ai_saves in (3, 5):
+            line, big = self.bank.exact("cb_sv3" if st.ai_saves == 3 else "cb_sv5"), True
+        elif st.rally > c["rally"] and st.rally in (5, 8, 12):
+            line, big = self.bank.exact(f"rally_{st.rally:02d}"), True
+        elif st.rally > c["rally"] and st.rally > 12 and st.rally % 4 == 0:
+            line, big = self.bank.exact("rally_gen"), True
+        elif bounced and random.random() < 0.6:
+            line = self.bank.line(["wall_"], self.game)
+        elif new_shot and random.random() < CHAT_SHOT_P:
+            if self.game == 2:
+                line = self.bank.line(["bld_0", "bld_1", "bld_pvp_"], 2)
+            elif shooter == "A":
+                line = self.bank.line(["bld_ai_", "bld_0", "bld_1"], 1)
+            else:
+                line = self.bank.line(["bld_0", "bld_1"], 1)
+        elif ball is None and not c["lost"] and now - c["seen"] > CHAT_LOST_S:
+            c["lost"] = True
+            line = self.bank.line(["lost_"], self.game)
+        elif c["rest"] and not c["rest_said"] and now - c["rest"] > CHAT_REST_S:
+            c["rest_said"] = True
+            line = self.bank.line(["col_"], self.game)
+
+        c["shots"], c["saves"], c["rally"] = shots, st.ai_saves, st.rally
+        if line and not goal_just_now and now - c["t"] > (CHAT_BIG_GAP_S if big else CHAT_GAP_S):
+            c["t"] = now
+            self.voice.play(line, priority=6, max_age=0.8)
 
     # ================================================================ layout
     def _make_layout(self, shape):
