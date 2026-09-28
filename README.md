@@ -26,8 +26,11 @@ Shared: TB6612 STBY pin 36, buzzer pin 21. Goal lasers (optional): pins 16 and 1
 ## Power-up
 
 - **Hold the freeze button while powering on:** self-test (motors and both servos, with beeps between).
-- Otherwise: beeps show the difficulty (2 = medium). Press freeze within 3 s to change it. Then the 3-minute match starts.
-- Match over: press freeze for a new match.
+- Otherwise: beeps show the difficulty (2 = medium). Press freeze within 3 s to change it.
+- Then the robot waits in its **lobby** for the laptop: the laptop app connects over the HC-05, you pick
+  **1 = single player** (vs the AI) or **2 = two players** (2nd joystick on pins 40 / 38 / 1), type the names,
+  and the robot starts that game. After each match it goes back to the lobby.
+- No laptop? Press freeze in the lobby to play single player against Mirror AI.
 
 ## Vision AI (laptop)
 

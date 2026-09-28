@@ -13,10 +13,13 @@ Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (whil
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
 Mouse: click the red tape on the right-hand (top-down) view to lock its colour.
 
-Live show window (see show/TARGET.md): type names + ENTER first (the show takes every key then).
+Live show window (see show/TARGET.md):
+       connecting screen (waits for the robot; s = play without it) -> 1 / 2 choose single or
+       two players -> type names + ENTER: the robot starts that game.
        k kick off without the robot   h / j goal for player / AI   e end match   v fullscreen
-       r replay highlights   ENTER next match   n new names
-The AI unpauses by itself at kick-off and pauses again at full time.
+       r replay highlights   ENTER rematch   n new game (back to the menu)
+The AI unpauses by itself at kick-off and pauses again at full time. In two-player games it
+stays paused: the camera only watches and shows the prediction.
 """
 import argparse
 import os
@@ -85,7 +88,8 @@ def main():
     ap.add_argument("--match-seconds", type=int, help="match length for the show's clock (default 180, sim 60)")
     args = ap.parse_args()
 
-    source = SimArena() if args.sim else Camera(args.cam)
+    match_seconds = args.match_seconds or (60 if args.sim else 180)
+    source = SimArena(match_seconds) if args.sim else Camera(args.cam)
     if args.sim:
         cal = Calibration(source.corners, source.wall_px)
         link = Link(sink=source, enabled=False)  # simulator never touches the real HC-05
@@ -113,7 +117,8 @@ def main():
 
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
     if not args.no_show:
-        show = Show(cal, voice=not args.no_voice, match_seconds=args.match_seconds or (60 if args.sim else 180))
+        show = Show(cal, voice=not args.no_voice, match_seconds=match_seconds,
+                    send=link.send, robot=not args.no_send)
         cv2.namedWindow(show_win, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(show_win, 1280, 720)
         show_phase = show.phase
@@ -146,12 +151,13 @@ def main():
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
             for line in mcu_lines:
-                if not (args.sim and line.startswith("G ")):
+                if line != "READY" and not (args.sim and line.startswith("G ")):
                     print("[mcu]", line)
                 if show:
                     show.on_line(line)
 
             if show:
+                show.link_state = link.mode
                 show.update(frame, flat_clean, stamp,
                             {"ball": ball, "vx": pred.vx, "vy": pred.vy, "path": pred.path(),
                              "hit": pred.intercept(), "carriage_x": carriage_x, "target": ctrl.target,
@@ -159,7 +165,7 @@ def main():
                 # the AI plays during a match and rests before / after it
                 if show.phase != show_phase:
                     if show.phase == "LIVE":
-                        paused = False
+                        paused = show.game == 2     # two players: the AI only watches
                     elif show_phase == "LIVE":
                         paused = True
                     show_phase = show.phase

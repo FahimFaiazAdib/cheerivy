@@ -20,16 +20,24 @@
  *          Laser receiver B OUT -> PD3 (INT1) / pin 17   beam on the AI goal line    -> HUMAN scores
  *          Receiver OUT is HIGH while it sees the laser; the ball breaks the beam = falling edge.
  *
+ *  Two-player mode: joystick 2 (X PA0 / pin 40, Y PA2 / pin 38, button PB0 / pin 1) drives
+ *  the AI-side carriage and servo instead of the AI.
+ *
  *  Power-up:
  *    - hold the FREEZE button while powering on  -> SELF-TEST (motors, both servos)
  *    - otherwise: difficulty beeps (2 = medium). Press FREEZE within 3 s to change
- *      1 / 2 / 3 beeps = easy / medium / hard (only affects Mirror AI), then the match starts.
+ *      1 / 2 / 3 beeps = easy / medium / hard (only affects Mirror AI).
+ *    - then the LOBBY: the robot waits for the laptop menu (or press FREEZE = 1P vs Mirror AI).
+ *      After every match it goes back to the lobby.
  *
- *  Laptop protocol (single bytes, each one is echoed back in lowercase):
+ *  Laptop protocol (single bytes):
  *    'L' 'R' 'S' move/stop AI carriage   'F' fire AI servo   'Z' freeze the human
+ *      (these are echoed back in lowercase)
+ *    '1' / '2'   choose single player / two players (lobby)   'K' kick off   'E' end the match now
  *    No byte for LINK_TIMEOUT_MS -> Mirror AI takes over (falling tone); link back -> rising tone.
  *
- *  Lines sent to the laptop:  "START LEVEL n"   "T <seconds left> CAM|MIR"
+ *  Lines sent to the laptop:  "READY" (every second in the lobby)
+ *    "START LEVEL n 1P|2P"   "T <seconds left> CAM|MIR|P2"
  *    "G H <human> <ai>" human scored   "G A <human> <ai>" AI scored   "END <human> <ai>"
  */
 #ifndef F_CPU
@@ -49,6 +57,7 @@
 #define FREEZE_COOLDOWN_MS     15000
 #define LINK_TIMEOUT_MS        400   /* laptop silent this long -> Mirror AI */
 #define MIRROR_SIGN            (+1)  /* set to -1 if Mirror AI moves OPPOSITE to the human */
+#define P2_DIR_SIGN            (+1)  /* set to -1 if player 2's carriage moves opposite to their joystick */
 #define MIRROR_FIRE_DELAY_MS   550   /* ~ball travel time from human flipper to AI */
 #define TELEMETRY_MS           1000
 #define GOAL_LOCKOUT_MS        1500  /* ignore the same beam this long after a goal (ball bouncing in the beam) */
@@ -174,6 +183,12 @@ static uint16_t adc_read(uint8_t ch) {
 
 static uint8_t freeze_btn_down(void) { return !(PINB & (1 << PB1)); }
 
+/* Joystick 2 (two-player mode only): X PA0 / pin 40, Y PA2 / pin 38, button PB0 / pin 1.
+   It drives the carriage + servo on the AI side. */
+static uint8_t freeze2_btn_down(void) { return !(PINB & (1 << PB0)); }
+
+static int8_t joy_dir(uint16_t x) { return (x < JOY_LOW) ? -1 : (x > JOY_HIGH) ? 1 : 0; }
+
 /* ============================================================== BUZZER (Timer2, non-blocking) */
 typedef struct { uint8_t ocr; uint8_t cs; } Note;   /* ocr 0 = rest; cs = duration in 10 ms */
 
@@ -233,6 +248,8 @@ static volatile char rx_move = 'S';
 static volatile uint8_t rx_fire, rx_freeze;
 static volatile uint32_t rx_last_ms;
 static volatile uint8_t rx_seen;
+static volatile uint8_t rx_game = 1;    /* '1' / '2' from the laptop menu: 1 = vs AI, 2 = two players */
+static volatile uint8_t rx_kick, rx_end; /* 'K' kick off (in the lobby), 'E' end the match early */
 
 static void uart_init(void) {
   const uint16_t ubrr = F_CPU / (16UL * UART_BAUD) - 1;
@@ -244,15 +261,19 @@ static void uart_init(void) {
 
 ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds */
   char c = UDR;
+  uint8_t echo = 1;                     /* only L R S F Z are echoed; menu bytes would garble status lines */
   switch (c) {
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
     case 'Z': rx_freeze = 1; break;
+    case '1': case '2': rx_game = c - '0'; echo = 0; break;
+    case 'K': rx_kick = 1; echo = 0; break;
+    case 'E': rx_end = 1; echo = 0; break;
     default: return;
   }
   rx_last_ms = g_ms;
   rx_seen = 1;
-  if (UCSRA & (1 << UDRE)) UDR = c | 0x20;  /* lowercase echo, so the laptop can check the link */
+  if (echo && (UCSRA & (1 << UDRE))) UDR = c | 0x20;  /* lowercase echo, so the laptop can check the link */
 }
 
 static void uart_putc(char c) {
@@ -385,6 +406,177 @@ static void init_all(void) {
   sei();
 }
 
+/* ============================================================== LOBBY */
+/* Wait here between matches. The laptop sends '1' or '2' (menu) and then 'K' (kick off).
+   Without a laptop, pressing FREEZE starts a single-player game against Mirror AI.
+   Returns the game: 1 = human vs AI, 2 = two players. */
+static uint8_t lobby(void) {
+  motor_ai(0);
+  motor_human(0);
+  rx_kick = rx_end = 0;
+  uint32_t next_ready = 0;
+  uint8_t was_down = 1;                 /* ignore a button still held from before */
+  for (;;) {
+    uint32_t now = millis();
+    buzz_update(now);
+    servo_update(now);
+    if (now >= next_ready) {
+      next_ready = now + 1000;
+      uart_puts("READY\n");             /* the laptop's "connecting..." screen waits for this */
+    }
+    if (rx_kick) {
+      rx_kick = 0;
+      return rx_game == 2 ? 2 : 1;
+    }
+    uint8_t down = freeze_btn_down();
+    if (down && !was_down) {
+      _delay_ms(30);                    /* debounce */
+      return 1;
+    }
+    was_down = down;
+  }
+}
+
+/* ============================================================== MATCH */
+static void play_match(uint8_t game, uint8_t level) {
+  PLAY(SND_START);
+  wait_ms(700);
+  uart_puts("START LEVEL ");
+  uart_putu(level + 1);
+  uart_puts(game == 2 ? " 2P\n" : " 1P\n");
+  lasers_report();
+
+  uint32_t start = millis();
+  uint32_t human_frozen_until = 0, ai_frozen_until = 0;
+  uint32_t human_freeze_ready = 0, ai_freeze_ready = 0;
+  uint32_t next_telemetry = 0;
+  uint16_t last_tick_sec = 0xFFFF;
+  uint8_t link_up = 0, btn_was_down = 1, btn2_was_down = 1;
+  uint8_t score_human = 0, score_ai = 0;
+  uint32_t goal_ready_at = 0;
+  mirror_fire_at = 0;
+  rx_end = 0;
+  goal_flags_take();                    /* forget anything that broke a beam before kick-off */
+
+  for (;;) {
+    uint32_t now = millis();
+    uint16_t left = MATCH_SECONDS - (uint16_t)((now - start) / 1000);
+    if ((now - start) / 1000 >= MATCH_SECONDS) break;
+    if (rx_end) { rx_end = 0; break; }  /* laptop ended the match early */
+
+    buzz_update(now);
+    servo_update(now);
+
+    /* ---------------- HUMAN (player 1) ---------------- */
+    int8_t human_dir = 0;
+    if (now >= human_frozen_until) {
+      uint16_t x = adc_read(1), y = adc_read(3);
+      human_dir = joy_dir(x);
+      if (y > JOY_HIGH && servo_ready(SERVO_HUMAN, now)) {
+        servo_fire(SERVO_HUMAN, now);
+        /* the ball leaves when the arm hits it, ~2/3 into the swing */
+        if (!mirror_fire_at) mirror_fire_at = now + HUMAN_CONTACT_MS + MIRROR_FIRE_DELAY_MS;
+      }
+      uint8_t down = freeze_btn_down();
+      if (down && !btn_was_down && now >= human_freeze_ready) {
+        ai_frozen_until = now + FREEZE_MS;
+        human_freeze_ready = now + FREEZE_COOLDOWN_MS;
+        PLAY(SND_SIREN);
+      }
+      btn_was_down = down;
+    }
+    motor_human(human_dir);
+    mirror_record(now, human_dir);
+
+    /* ---------------- AI side: laptop AI / Mirror AI / player 2 ---------------- */
+    uint32_t last_rx;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
+    uint8_t link_now = rx_seen && (now - last_rx < LINK_TIMEOUT_MS);
+    if (link_now != link_up) {
+      link_up = link_now;
+      if (game == 1) {                  /* in 2P nobody cares which AI would be playing */
+        PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
+        uart_puts(link_up ? "MODE CAMERA\n" : "MODE MIRROR\n");
+      }
+    }
+
+    int8_t ai_dir = 0;
+    if (now >= ai_frozen_until) {
+      if (game == 2) {
+        uint16_t x2 = adc_read(0), y2 = adc_read(2);
+        ai_dir = P2_DIR_SIGN * joy_dir(x2);
+        if (y2 > JOY_HIGH) servo_fire(SERVO_AI, now);   /* does nothing until the servo is ready */
+        uint8_t down2 = freeze2_btn_down();
+        if (down2 && !btn2_was_down && now >= ai_freeze_ready) {
+          human_frozen_until = now + FREEZE_MS;
+          ai_freeze_ready = now + FREEZE_COOLDOWN_MS;
+          PLAY(SND_SIREN);
+        }
+        btn2_was_down = down2;
+        rx_fire = rx_freeze = 0;        /* the laptop AI is only watching in 2P */
+      } else if (link_up) {
+        ai_dir = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
+        if (rx_fire) { rx_fire = 0; servo_fire(SERVO_AI, now); }
+        if (rx_freeze) {
+          rx_freeze = 0;
+          if (now >= ai_freeze_ready) {
+            human_frozen_until = now + FREEZE_MS;
+            ai_freeze_ready = now + FREEZE_COOLDOWN_MS;
+            PLAY(SND_SIREN);
+          }
+        }
+        mirror_fire_at = 0;
+      } else {
+        ai_dir = mirror_dir(level);
+        if (mirror_fire_at && now >= mirror_fire_at) {
+          mirror_fire_at = 0;
+          servo_fire(SERVO_AI, now);
+        }
+      }
+    } else {
+      rx_fire = rx_freeze = 0;          /* frozen: ignore queued actions */
+    }
+    motor_ai(ai_dir);
+
+    /* ---------------- GOALS ---------------- */
+    uint8_t g = goal_flags_take();
+    if (g && now >= goal_ready_at) {
+      goal_ready_at = now + GOAL_LOCKOUT_MS;
+      uint8_t human_scored = (g & GOAL_AT_AI) != 0;   /* both at once can't really happen; favour the human */
+      if (human_scored) { score_human++; PLAY(SND_GOAL_HUMAN); }
+      else              { score_ai++;    PLAY(SND_GOAL_AI); }
+      uart_puts(human_scored ? "G H " : "G A ");
+      uart_putu(score_human);
+      uart_putc(' ');
+      uart_putu(score_ai);
+      uart_putc('\n');
+    }
+
+    /* ---------------- TIMER SOUNDS + TELEMETRY ---------------- */
+    if (left <= 10 && left != last_tick_sec) {
+      last_tick_sec = left;
+      PLAY(SND_TICK);
+    }
+    if (now >= next_telemetry) {
+      next_telemetry = now + TELEMETRY_MS;
+      uart_puts("T ");
+      uart_putu(left);
+      uart_puts(game == 2 ? " P2\n" : link_up ? " CAM\n" : " MIR\n");
+    }
+  }
+
+  /* ---------------- MATCH OVER ---------------- */
+  motor_ai(0);
+  motor_human(0);
+  uart_puts("END ");
+  uart_putu(score_human);
+  uart_putc(' ');
+  uart_putu(score_ai);
+  uart_putc('\n');
+  PLAY(SND_END);
+  wait_ms(1500);
+}
+
 /* ============================================================== MAIN */
 int main(void) {
   init_all();
@@ -396,127 +588,8 @@ int main(void) {
 
   uint8_t level = select_level();
 
-  for (;;) {                            /* one loop = one match */
-    PLAY(SND_START);
-    wait_ms(700);
-    uart_puts("START LEVEL ");
-    uart_putu(level + 1);
-    uart_putc('\n');
-    lasers_report();
-
-    uint32_t start = millis();
-    uint32_t human_frozen_until = 0, ai_frozen_until = 0;
-    uint32_t human_freeze_ready = 0, ai_freeze_ready = 0;
-    uint32_t next_telemetry = 0;
-    uint16_t last_tick_sec = 0xFFFF;
-    uint8_t link_up = 0, btn_was_down = 1;
-    uint8_t score_human = 0, score_ai = 0;
-    uint32_t goal_ready_at = 0;
-    goal_flags_take();                  /* forget anything that broke a beam before kick-off */
-
-    for (;;) {
-      uint32_t now = millis();
-      uint16_t left = MATCH_SECONDS - (uint16_t)((now - start) / 1000);
-      if ((now - start) / 1000 >= MATCH_SECONDS) break;
-
-      buzz_update(now);
-      servo_update(now);
-
-      /* ---------------- HUMAN ---------------- */
-      int8_t human_dir = 0;
-      if (now >= human_frozen_until) {
-        uint16_t x = adc_read(1), y = adc_read(3);
-        human_dir = (x < JOY_LOW) ? -1 : (x > JOY_HIGH) ? 1 : 0;
-        if (y > JOY_HIGH && servo_ready(SERVO_HUMAN, now)) {
-          servo_fire(SERVO_HUMAN, now);
-          /* the ball leaves when the arm hits it, ~2/3 into the swing */
-          if (!mirror_fire_at) mirror_fire_at = now + HUMAN_CONTACT_MS + MIRROR_FIRE_DELAY_MS;
-        }
-        uint8_t down = freeze_btn_down();
-        if (down && !btn_was_down && now >= human_freeze_ready) {
-          ai_frozen_until = now + FREEZE_MS;
-          human_freeze_ready = now + FREEZE_COOLDOWN_MS;
-          PLAY(SND_SIREN);
-        }
-        btn_was_down = down;
-      }
-      motor_human(human_dir);
-      mirror_record(now, human_dir);
-
-      /* ---------------- AI ---------------- */
-      uint32_t last_rx;
-      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
-      uint8_t link_now = rx_seen && (now - last_rx < LINK_TIMEOUT_MS);
-      if (link_now != link_up) {
-        link_up = link_now;
-        PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
-        uart_puts(link_up ? "MODE CAMERA\n" : "MODE MIRROR\n");
-      }
-
-      int8_t ai_dir = 0;
-      if (now >= ai_frozen_until) {
-        if (link_up) {
-          ai_dir = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
-          if (rx_fire) { rx_fire = 0; servo_fire(SERVO_AI, now); }
-          if (rx_freeze) {
-            rx_freeze = 0;
-            if (now >= ai_freeze_ready) {
-              human_frozen_until = now + FREEZE_MS;
-              ai_freeze_ready = now + FREEZE_COOLDOWN_MS;
-              PLAY(SND_SIREN);
-            }
-          }
-          mirror_fire_at = 0;
-        } else {
-          ai_dir = mirror_dir(level);
-          if (mirror_fire_at && now >= mirror_fire_at) {
-            mirror_fire_at = 0;
-            servo_fire(SERVO_AI, now);
-          }
-        }
-      } else {
-        rx_fire = rx_freeze = 0;        /* frozen: ignore queued actions */
-      }
-      motor_ai(ai_dir);
-
-      /* ---------------- GOALS ---------------- */
-      uint8_t g = goal_flags_take();
-      if (g && now >= goal_ready_at) {
-        goal_ready_at = now + GOAL_LOCKOUT_MS;
-        uint8_t human_scored = (g & GOAL_AT_AI) != 0;   /* both at once can't really happen; favour the human */
-        if (human_scored) { score_human++; PLAY(SND_GOAL_HUMAN); }
-        else              { score_ai++;    PLAY(SND_GOAL_AI); }
-        uart_puts(human_scored ? "G H " : "G A ");
-        uart_putu(score_human);
-        uart_putc(' ');
-        uart_putu(score_ai);
-        uart_putc('\n');
-      }
-
-      /* ---------------- TIMER SOUNDS + TELEMETRY ---------------- */
-      if (left <= 10 && left != last_tick_sec) {
-        last_tick_sec = left;
-        PLAY(SND_TICK);
-      }
-      if (now >= next_telemetry) {
-        next_telemetry = now + TELEMETRY_MS;
-        uart_puts("T ");
-        uart_putu(left);
-        uart_puts(link_up ? " CAM\n" : " MIR\n");
-      }
-    }
-
-    /* ---------------- MATCH OVER ---------------- */
-    motor_ai(0);
-    motor_human(0);
-    uart_puts("END ");
-    uart_putu(score_human);
-    uart_putc(' ');
-    uart_putu(score_ai);
-    uart_putc('\n');
-    PLAY(SND_END);
-    while (freeze_btn_down()) buzz_update(millis());
-    while (!freeze_btn_down()) buzz_update(millis());   /* press FREEZE for a new match */
-    while (freeze_btn_down()) buzz_update(millis());
+  for (;;) {
+    uint8_t game = lobby();             /* laptop menu (or FREEZE button) picks the game */
+    play_match(game, level);
   }
 }

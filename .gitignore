@@ -25,3 +25,10 @@ __pycache__/
 archive/
 cheerivy_ai/calib.json
 cheerivy_ai/show/cache/
+
+# voice clone inputs/outputs and render pipeline (not published)
+cheerivy_ai/show/voice_refs/
+cheerivy_ai/show/voice_bank/
+
+# unpacked copy of CHEERIVY_burn.zip
+CHEERIVY_burn/

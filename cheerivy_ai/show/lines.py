@@ -19,6 +19,12 @@ NO_GOALS = "No goals today. A defensive masterclass."
 AWARD_ROCKET = "The Rocket award goes to {who}, at {v} centimetres per second."
 AWARD_WALL = "The Wall. {ai} saved {n} shots."
 
+# Two-player games: {p} = player 1, {ai} = player 2; goal lines get the scorer's name as {p}.
+KICKOFF_2P = ["Welcome to CHEERIVY! {p} versus {ai}. Three minutes on the clock. Let's go!",
+              "Player one, {p}. Player two, {ai}. Kick off!"]
+GOAL_2P = ["What a goal by {p}!", "{p} scores!", "Brilliant finish from {p}!", "Goal! {p} finds the net!"]
+FULL_TIME_WIN_2P = "Full time! {p} wins, {h} to {a}!"
+
 FAST_SPEED = 60.0   # cm/s: say the speed only for shots faster than this
 
 
@@ -31,8 +37,12 @@ def pick(options, **kw):
     return fill(random.choice(options) if isinstance(options, list) else options, **kw)
 
 
-def all_goal_lines(p, ai):
+def all_goal_lines(p, ai, game=1):
     """Everything worth pre-rendering once the names are known."""
-    out = [fill(t, p=p, ai=ai) for t in KICKOFF + GOAL_H + GOAL_A]
+    if game == 2:
+        out = [fill(t, p=p, ai=ai) for t in KICKOFF_2P]
+        out += [fill(t, p=who) for t in GOAL_2P for who in (p, ai)]
+    else:
+        out = [fill(t, p=p, ai=ai) for t in KICKOFF + GOAL_H + GOAL_A]
     out += [fill(SECONDS_30), fill(SECONDS_10, p=p), HIGHLIGHTS]
     return out

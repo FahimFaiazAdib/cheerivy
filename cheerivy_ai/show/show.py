@@ -1,7 +1,9 @@
 """
 CHEERIVY Live Show: the big-screen window next to the robot.
 
-    NAMES    type the player (and AI) names
+    CONNECT  waiting for the robot's "READY" over the HC-05 (s = play without the robot)
+    MENU     1 = single player (vs the AI)   2 = two players (joystick vs joystick)
+    NAMES    type the player names; ENTER sends the game + kick-off to the robot
     WAITING  live view, waiting for the robot's "START" (or press k)
     LIVE     camera | AI vision side by side, scoreboard, goal animations + instant replay
     RESULTS  full time -> highlight reel -> awards -> winner + leaderboard
@@ -40,7 +42,8 @@ MARGIN = 26
 GAP = 22
 FOOTER_MIN = 92
 
-NAMES, WAITING, LIVE, RESULTS = "NAMES", "WAITING", "LIVE", "RESULTS"
+CONNECT, MENU, NAMES, WAITING, LIVE, RESULTS = "CONNECT", "MENU", "NAMES", "WAITING", "LIVE", "RESULTS"
+READY_FRESH_S = 3.0        # a "READY" newer than this = the robot is in its lobby and listening
 GOAL_ANIM_S = 3.2
 MAX_REEL = 6               # goals shown in the highlight reel
 END_GRACE_S = 4.0          # clock hit 0 but no END line -> end the match ourselves
@@ -78,13 +81,20 @@ class Burst:
 
 
 class Show:
-    def __init__(self, cal, voice=True, match_seconds=180, level=2):
+    def __init__(self, cal, voice=True, match_seconds=180, level=2, send=None, robot=True):
+        """send: function that writes one command byte to the robot (Link.send).
+        robot=False: no robot to talk to, so skip the CONNECT screen."""
         self.cal = cal
         self.match_seconds = match_seconds
         self.level = level
-        self.names = {"H": "", "A": "CHEERIVY AI"}
+        self.send = send or (lambda c: None)
+        self.robot = robot
+        self.ready_at = 0.0             # last "READY" from the robot's lobby
+        self.link_state = ""            # set by main.py: "HC-05" / "RECONNECTING" / "SIM"
+        self.game = 1                   # 1 = vs AI, 2 = two players
+        self.names = {"H": "", "A": ""}
         self.field = "H"
-        self.phase = NAMES
+        self.phase = CONNECT if robot else MENU
         self.phase_t = time.time()
         self.lock = threading.Lock()
 
@@ -131,19 +141,41 @@ class Show:
         self.phase, self.phase_t = p, time.time()
 
     def player(self):
-        return self.names["H"].strip() or "PLAYER"
+        return self.names["H"].strip() or ("PLAYER 1" if self.game == 2 else "PLAYER")
 
     def ai_name(self):
-        return self.names["A"].strip() or "CHEERIVY AI"
+        """The name on the AI side: the AI in 1P, player 2 in 2P."""
+        return self.names["A"].strip() or ("PLAYER 2" if self.game == 2 else "CHEERIVY AI")
 
     def name_of(self, who):
         return self.player() if who == "H" else self.ai_name()
 
+    def side_label(self, who):
+        if self.game == 2:
+            return "PLAYER 1" if who == "H" else "PLAYER 2"
+        return "PLAYER" if who == "H" else "AI"
+
+    def robot_listening(self):
+        return self.robot and time.time() - self.ready_at < READY_FRESH_S
+
+    def choose_game(self, game):
+        self.game = game
+        self.names = {"H": "", "A": ""}
+        self.field = "H"
+        self._set_phase(NAMES)
+
     def _names_done(self):
         self.names["H"] = self.player()
         self.names["A"] = self.ai_name()
-        self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name()))
+        self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
         self._set_phase(WAITING)
+        self.request_kickoff()
+
+    def request_kickoff(self):
+        """Tell the robot which game to play and start it. Its "START" line then kicks off here."""
+        if self.robot_listening():
+            self.send(str(self.game))
+            self.send("K")
 
     # ================================================================ inputs (main thread)
     def update(self, frame, flat, stamp, tele):
@@ -163,16 +195,26 @@ class Show:
         if not parts:
             return None
         tag = parts[0]
+        if tag == "READY":
+            self.ready_at = time.time()
+            if self.phase == CONNECT:
+                self._set_phase(MENU)
+            return None
         if tag == "START":
             m = re.search(r"LEVEL (\d)", line)
             if m:
                 self.level = int(m.group(1))
+            if "2P" in parts:
+                self.game = 2
+            elif "1P" in parts and self.game != 1:
+                self.game = 1                  # started from the robot's button: always vs the AI
+                self.names = {"H": "", "A": ""}
             self.kickoff()
             return "start"
         if tag == "T" and len(parts) >= 2 and parts[1].isdigit():
             self.clock_sync = (int(parts[1]), time.time())
             if len(parts) >= 3:
-                self.link_mode = "CAMERA" if parts[2] == "CAM" else "MIRROR"
+                self.link_mode = {"CAM": "CAMERA", "MIR": "MIRROR", "P2": "2 PLAYERS"}.get(parts[2], parts[2])
             if self.phase != LIVE and self.phase != RESULTS and int(parts[1]) > 1:
                 self.kickoff(announce=False)      # we joined mid-match
             return None
@@ -190,6 +232,17 @@ class Show:
 
     def on_key(self, k):
         """Returns True if the show used the key (main.py then ignores it)."""
+        c = chr(k) if 0 <= k < 128 else ""
+        if self.phase == CONNECT:
+            if c == "s":                        # play without the robot (keys h / j / k / e)
+                self._set_phase(MENU)
+                return True
+            return c != "q"
+        if self.phase == MENU:
+            if c in ("1", "2"):
+                self.choose_game(int(c))
+                return True
+            return c != "q"
         if self.phase == NAMES:
             if k in (13, 10):
                 self._names_done()
@@ -202,18 +255,20 @@ class Show:
             elif 32 <= k < 127 and len(self.names[self.field]) < 16:
                 self.names[self.field] += chr(k)
             return True
-        c = chr(k) if 0 <= k < 128 else ""
-        if c == "n" and self.phase != LIVE:
-            self.field = "H"
-            self._set_phase(NAMES)
+        if c == "n" and self.phase != LIVE:     # new game: back to the 1P / 2P menu
+            self._set_phase(MENU)
             return True
         if c == "k" and self.phase in (WAITING, RESULTS):
-            self.kickoff()
+            if self.robot_listening():
+                self.request_kickoff()          # the robot's START line kicks off here
+            else:
+                self.kickoff()
             return True
         if self.phase == LIVE and c in ("h", "j"):
             self.goal("H" if c == "h" else "A")
             return True
         if self.phase == LIVE and c == "e":
+            self.send("E")                      # stop the robot too
             self.end_match()
             return True
         if self.phase == RESULTS:
@@ -221,15 +276,17 @@ class Show:
                 self.results["t0"] = time.time()
                 self.results["said"] = set()
                 return True
-            if k in (13, 10):
+            if k in (13, 10):                   # next match: same names, same game
                 self._set_phase(WAITING)
+                self.request_kickoff()
                 return True
         return False
 
     # ================================================================ match events
     def kickoff(self, announce=True):
-        if self.phase == NAMES:
-            self._names_done()
+        if self.phase in (CONNECT, MENU, NAMES):   # match already running on the robot: just join it
+            self.names["H"], self.names["A"] = self.player(), self.ai_name()
+            self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
         with self.lock:
             self._reset_match()
             self.match_start = time.time()
@@ -239,7 +296,8 @@ class Show:
             self.match_folder = folder
         self._set_phase(LIVE)
         if announce:
-            self.voice.say(L.pick(L.KICKOFF, p=self.player(), ai=self.ai_name()), priority=2, max_age=6)
+            self.voice.say(L.pick(L.KICKOFF_2P if self.game == 2 else L.KICKOFF, p=self.player(), ai=self.ai_name()),
+                           priority=2, max_age=6)
 
     def goal(self, who):
         if self.phase != LIVE:
@@ -265,10 +323,14 @@ class Show:
         self.pip = None
         self.bursts.append(Burst(W / 2, H * 0.42, G.HUMAN if who == "H" else G.AI))
         _sound("Hero" if who == "H" else "Sosumi")
-        pl, ai = self.player(), self.ai_name()
-        self.voice.say(L.pick(L.GOAL_H if who == "H" else L.GOAL_A, p=pl, ai=ai), priority=1, max_age=5, interrupt=True)
+        self.voice.say(self._goal_line(who), priority=1, max_age=5, interrupt=True)
         if speed >= L.FAST_SPEED:
             self.voice.say(L.fill(L.FAST, v=speed), priority=2, max_age=7)
+
+    def _goal_line(self, who):
+        if self.game == 2:
+            return L.pick(L.GOAL_2P, p=self.name_of(who))
+        return L.pick(L.GOAL_H if who == "H" else L.GOAL_A, p=self.player(), ai=self.ai_name())
 
     def end_match(self):
         if self.phase != LIVE:
@@ -276,19 +338,25 @@ class Show:
         now = time.time()
         h, a = self.score["H"], self.score["A"]
         fastest_h = max([g["speed"] for g in self.goals if g["who"] == "H"] or [0.0])
-        self.result_row = self.board.add(self.player(), h, a, fastest_h, self.level)
+        # the leaderboard is "vs the AI", so only single-player games count
+        self.result_row = self.board.add(self.player(), h, a, fastest_h, self.level) if self.game == 1 else None
         self.ended_at = now
         self.results = {"t0": now, "said": set(), "scenes": None}
         self._save_summary()
         self._set_phase(RESULTS)
         pl, ai = self.player(), self.ai_name()
-        line = L.FULL_TIME_WIN_H if h > a else L.FULL_TIME_WIN_A if a > h else L.FULL_TIME_DRAW
-        self.voice.say(L.fill(line, p=pl, ai=ai, h=h, a=a), priority=1, max_age=8, interrupt=True)
+        if self.game == 2 and h != a:
+            text = L.fill(L.FULL_TIME_WIN_2P, p=pl if h > a else ai, h=max(h, a), a=min(h, a))
+        else:
+            line = L.FULL_TIME_WIN_H if h > a else L.FULL_TIME_WIN_A if a > h else L.FULL_TIME_DRAW
+            text = L.fill(line, p=pl, ai=ai, h=h, a=a)
+        self.voice.say(text, priority=1, max_age=8, interrupt=True)
 
     def _save_summary(self):
         try:
             with open(os.path.join(self.match_folder, "match.json"), "w") as f:
-                json.dump({"player": self.player(), "ai": self.ai_name(), "level": self.level,
+                json.dump({"game": "2P" if self.game == 2 else "1P",
+                           "player": self.player(), "ai": self.ai_name(), "level": self.level,
                            "score": self.score, "shots": self.stats.shots, "ai_saves": self.stats.ai_saves,
                            "longest_rally": self.stats.longest_rally, "top_speed": round(self.stats.top_speed),
                            "goals": [{"n": g["n"], "who": g["who"], "name": g["name"], "clock": round(g["clock"]),
@@ -339,15 +407,16 @@ class Show:
 
         self._timers(now)
         canvas = self.base_bg.copy()
-        need_stage = self.phase in (WAITING, LIVE, NAMES) or self.recorder.pending
+        need_stage = self.phase in (CONNECT, MENU, NAMES, WAITING, LIVE) or self.recorder.pending
         stage = None
         if need_stage:
             stage = self._draw_stage(frame, flat, tele, trail, now)
             if self.phase == LIVE or self.recorder.pending:
                 self.recorder.push(stage, now)
 
-        if self.phase == NAMES:
-            self._draw_names(canvas, stage, now)
+        if self.phase in (CONNECT, MENU, NAMES):
+            self._draw_blurred_stage(canvas, stage)
+            {CONNECT: self._draw_connect, MENU: self._draw_menu, NAMES: self._draw_names}[self.phase](canvas, now)
         elif self.phase in (WAITING, LIVE):
             lo = self.layout
             canvas[lo["stage_y"]:lo["stage_y"] + stage.shape[0], lo["stage_x"]:lo["stage_x"] + stage.shape[1]] = stage
@@ -442,7 +511,8 @@ class Show:
         td = self._draw_ai_view(flat, tele, trail, now)
         stage[:, lo["cam_w"] + GAP:] = td
         for x0, w, label, col in ((0, lo["cam_w"], "LIVE CAMERA", G.WHITE),
-                                  (lo["cam_w"] + GAP, lo["td_w"], "AI VISION  ·  PREDICTION", G.CYAN)):
+                                  (lo["cam_w"] + GAP, lo["td_w"],
+                                   "PREDICTION" if self.game == 2 else "AI VISION  ·  PREDICTION", G.CYAN)):
             _brackets(stage, x0, 0, x0 + w - 1, h - 1, col)
             G.rect(stage, x0 + 12, 12, x0 + 22 + G.text_width(label, "ui", 19), 44, (0, 0, 0), 0.55)
             G.text(stage, label, x0 + 17, 28, "ui", 19, col, "l")
@@ -467,8 +537,9 @@ class Show:
         cv2.polylines(img, [poly], True, (120, 90, 40), 6, cv2.LINE_AA)
         cv2.polylines(img, [poly], True, G.CYAN, 2, cv2.LINE_AA)
         G.dashed_polyline(img, [P((C.X0, C.AI_LINE_Y)), P((C.X0 + C.BASE_W, C.AI_LINE_Y))], (90, 90, 180), 1, 8, 8)
-        G.text(img, "AI GOAL", *P((C.X0 + C.BASE_W / 2, C.AI_LINE_Y + 3.5)), "ui", 15, (120, 120, 230), "c")
-        G.text(img, "PLAYER GOAL", *P((C.X0 + C.BASE_W / 2, C.ARENA_H - 3)), "ui", 15, (230, 190, 120), "c")
+        top, bottom = ("P2 GOAL", "P1 GOAL") if self.game == 2 else ("AI GOAL", "PLAYER GOAL")
+        G.text(img, top, *P((C.X0 + C.BASE_W / 2, C.AI_LINE_Y + 3.5)), "ui", 15, (120, 120, 230), "c")
+        G.text(img, bottom, *P((C.X0 + C.BASE_W / 2, C.ARENA_H - 3)), "ui", 15, (230, 190, 120), "c")
 
         # AI carriage + where it's heading
         cx = tele.get("carriage_x")
@@ -508,8 +579,8 @@ class Show:
             G.glow_circle(img, bp, C.BALL_RADIUS * s, G.GOLD)
 
         status = tele.get("status", "")
-        label = "INTERCEPTING" if path else ("TRACKING BALL" if ball else "SEARCHING...")
-        if status.startswith("FIRE"):
+        label = ("INCOMING" if self.game == 2 else "INTERCEPTING") if path else ("TRACKING BALL" if ball else "SEARCHING...")
+        if status.startswith("FIRE") and self.game == 1:
             label = "FIRE!"
         G.text(img, label, lo["td_w"] - 34, lo["h"] - 20, "ui", 18,
                G.GOLD if label == "FIRE!" else G.GREEN if path else G.DIM, "br")
@@ -522,9 +593,9 @@ class Show:
         G.rect(canvas, W // 2, HEADER_H - 3, W, HEADER_H, G.AI)
         cxm = W // 2
         # names
-        G.text(canvas, "PLAYER", MARGIN + 6, 28, "ui", 17, G.HUMAN, "l")
+        G.text(canvas, self.side_label("H"), MARGIN + 6, 28, "ui", 17, G.HUMAN, "l")
         G.text(canvas, self.player().upper(), MARGIN + 4, 74, "display", 52, G.WHITE, "l")
-        G.text(canvas, "AI", W - MARGIN - 6, 28, "ui", 17, G.AI, "r")
+        G.text(canvas, self.side_label("A"), W - MARGIN - 6, 28, "ui", 17, G.AI, "r")
         G.text(canvas, self.ai_name().upper(), W - MARGIN - 4, 74, "display", 52, G.WHITE, "r")
         # score (the digit that just changed pops)
         pop = {"H": 1.0, "A": 1.0}
@@ -542,7 +613,7 @@ class Show:
         G.rect(canvas, cxm - 62, 92, cxm + 62, HEADER_H - 8, (0, 0, 0), 0.5)
         G.text(canvas, G.fmt_clock(left), cxm, 106, "score", 30, col, "c", scale=sc)
         G.text(canvas, f"LEVEL {self.level}", cxm - 150, 106, "ui", 15, G.DIM, "r")
-        G.text(canvas, f"AI: {self.link_mode}", cxm + 150, 106, "ui", 15, G.DIM, "l")
+        G.text(canvas, "2 PLAYERS" if self.game == 2 else f"AI: {self.link_mode}", cxm + 150, 106, "ui", 15, G.DIM, "l")
 
     def _draw_footer(self, canvas, tele, now):
         lo = self.layout
@@ -553,10 +624,11 @@ class Show:
         yc = (y0 + y1) // 2
         st = self.stats
         sp = st.speeds[-1][1] if tele.get("ball") and st.speeds and time.time() - st.speeds[-1][0] < 0.3 else 0.0
+        two = self.game == 2
         cells = [("BALL SPEED", f"{sp:3.0f}", "cm/s", G.GOLD),
                  ("TOP SPEED", f"{st.top_speed:3.0f}", "cm/s", G.GOLD),
-                 ("SHOTS", f"{st.shots['H']} · {st.shots['A']}", "you · AI", G.WHITE),
-                 ("AI SAVES", str(st.ai_saves), "", G.AI),
+                 ("SHOTS", f"{st.shots['H']} · {st.shots['A']}", "P1 · P2" if two else "you · AI", G.WHITE),
+                 ("P2 SAVES" if two else "AI SAVES", str(st.ai_saves), "", G.AI),
                  ("RALLY", str(st.rally), f"best {st.longest_rally}", G.GREEN)]
         cw = (x1 - x0) / (len(cells) + 1.3)
         for i, (lab, val, unit, col) in enumerate(cells):
@@ -576,20 +648,59 @@ class Show:
         G.text(canvas, "h / j goal · e end · v fullscreen", x1 - 18, yc + 14, "ui_light", 14, G.DIM, "r")
 
     # ================================================================ phase screens
-    def _draw_names(self, canvas, stage, now):
-        if stage is not None:
-            bg = cv2.GaussianBlur(cv2.resize(stage, (W // 4, int(W / 4 * stage.shape[0] / stage.shape[1]))), (0, 0), 3)
-            bg = cv2.resize(bg, (W, int(W * stage.shape[0] / stage.shape[1])))
-            y = (H - bg.shape[0]) // 2
-            if y >= 0:
-                canvas[y:y + bg.shape[0]] = G.darken(bg, 0.28)
-            else:
-                canvas[:] = G.darken(bg[-y:-y + H], 0.28)
+    def _draw_blurred_stage(self, canvas, stage):
+        if stage is None:
+            return
+        bg = cv2.GaussianBlur(cv2.resize(stage, (W // 4, int(W / 4 * stage.shape[0] / stage.shape[1]))), (0, 0), 3)
+        bg = cv2.resize(bg, (W, int(W * stage.shape[0] / stage.shape[1])))
+        y = (H - bg.shape[0]) // 2
+        if y >= 0:
+            canvas[y:y + bg.shape[0]] = G.darken(bg, 0.28)
+        else:
+            canvas[:] = G.darken(bg[-y:-y + H], 0.28)
+
+    def _draw_title(self, canvas, now, sub):
         t = now - self.phase_t
         G.text(canvas, "CHEERIVY", W // 2, 150, "display", 120, G.WHITE, "c", glow=G.CYAN,
                scale=0.9 + 0.1 * G.ease_out_back(t / 0.6))
-        G.text(canvas, "ROBOT DUEL  ·  HUMAN vs AI", W // 2, 235, "ui", 26, G.CYAN, "c")
-        for i, (who, col, label) in enumerate((("H", G.HUMAN, "PLAYER"), ("A", G.AI, "AI OPPONENT"))):
+        G.text(canvas, sub, W // 2, 235, "ui", 26, G.CYAN, "c")
+
+    def _draw_connect(self, canvas, now):
+        self._draw_title(canvas, now, "ROBOT DUEL")
+        a = 0.6 + 0.4 * math.sin(now * 3)
+        dots = "." * (int(now * 2) % 4)
+        G.text(canvas, f"Connecting to the robot{dots}", W // 2, 380, "display", 54, G.WHITE, "c", alpha=a)
+        port = {"HC-05": "Bluetooth connected, waiting for the robot",
+                "RECONNECTING": "looking for the HC-05...",
+                "SIM": "simulator"}.get(self.link_state, self.link_state)
+        G.text(canvas, port, W // 2, 450, "ui", 24, G.CYAN, "c")
+        G.text(canvas, "Power on the robot  ·  the HC-05 LED should blink twice every 2 s", W // 2, 530,
+               "ui_light", 22, G.DIM, "c")
+        G.text(canvas, "s = play without the robot   ·   q = quit", W // 2, 580, "ui_light", 20, G.DIM, "c")
+
+    def _draw_menu(self, canvas, now):
+        self._draw_title(canvas, now, "CHOOSE A GAME")
+        cards = (("1", "SINGLE PLAYER", "you  vs  the AI", "camera AI drives the other carriage", G.HUMAN),
+                 ("2", "TWO PLAYERS", "joystick  vs  joystick", "player 2 uses the second joystick", G.AI))
+        for i, (key, title, sub, info, col) in enumerate(cards):
+            x0 = W // 2 - 520 + i * 540
+            G.rect(canvas, x0, 300, x0 + 500, 560, (30, 22, 20), 0.88)
+            cv2.rectangle(canvas, (x0, 300), (x0 + 500, 560), col, 3, cv2.LINE_AA)
+            G.rect(canvas, x0, 300, x0 + 10, 560, col)
+            G.text(canvas, key, x0 + 60, 380, "score", 96, col, "c", glow=col)
+            G.text(canvas, title, x0 + 120, 370, "display", 48, G.WHITE, "l")
+            G.text(canvas, sub, x0 + 120, 425, "ui", 24, col, "l")
+            G.text(canvas, info, x0 + 40, 500, "ui_light", 20, G.DIM, "l")
+        ok = self.robot_listening()
+        status = "robot ready" if ok else ("robot not connected: goals by keys h / j" if self.robot else "no robot")
+        G.text(canvas, f"press 1 or 2   ·   {status}", W // 2, 620, "ui_light", 22, G.GREEN if ok else G.DIM, "c")
+        if self.game == 1:
+            self._draw_leaderboard(canvas, W // 2 - 330, 670, 660, 3)
+
+    def _draw_names(self, canvas, now):
+        self._draw_title(canvas, now, "ROBOT DUEL  ·  " + ("PLAYER 1 vs PLAYER 2" if self.game == 2 else "HUMAN vs AI"))
+        labels = ("PLAYER 1", "PLAYER 2") if self.game == 2 else ("PLAYER", "AI OPPONENT")
+        for i, (who, col, label) in enumerate((("H", G.HUMAN, labels[0]), ("A", G.AI, labels[1]))):
             x0 = W // 2 - 480 + i * 500
             active = self.field == who
             G.rect(canvas, x0, 320, x0 + 460, 470, (30, 22, 20), 0.85)
@@ -601,8 +712,10 @@ class Show:
             shown = name if name else ("type a name" if not active else "")
             G.text(canvas, (shown + caret) or " ", x0 + 30, 420, "display", 54,
                    G.WHITE if name else G.DIM, "l")
-        G.text(canvas, "type a name   ·   TAB switch player / AI   ·   ENTER done", W // 2, 520, "ui_light", 22, G.DIM, "c")
-        self._draw_leaderboard(canvas, W // 2 - 330, 575, 660, 5)
+        tab = "TAB switch player" if self.game == 2 else "TAB switch player / AI"
+        G.text(canvas, f"type a name   ·   {tab}   ·   ENTER start", W // 2, 520, "ui_light", 22, G.DIM, "c")
+        if self.game == 1:
+            self._draw_leaderboard(canvas, W // 2 - 330, 575, 660, 5)
 
     def _draw_waiting(self, canvas, now):
         lo = self.layout
@@ -611,9 +724,9 @@ class Show:
         G.rect(canvas, 0, cy - 95, W, cy + 95, (0, 0, 0), 0.72)
         G.text(canvas, f"{self.player().upper()}  vs  {self.ai_name().upper()}", W // 2, cy - 35, "display", 64,
                G.WHITE, "c", glow=G.CYAN)
-        G.text(canvas, "Waiting for kick-off  ·  power on the robot or press FREEZE", W // 2, cy + 30, "ui", 26,
-               G.CYAN, "c", alpha=a)
-        G.text(canvas, "k = kick off now   ·   n = change names", W // 2, cy + 70, "ui_light", 18, G.DIM, "c")
+        msg = "Starting the robot..." if self.robot_listening() else "Waiting for kick-off  ·  robot not in its lobby"
+        G.text(canvas, msg, W // 2, cy + 30, "ui", 26, G.CYAN, "c", alpha=a)
+        G.text(canvas, "k = kick off now   ·   n = new game", W // 2, cy + 70, "ui_light", 18, G.DIM, "c")
 
     def _draw_goal_anim(self, canvas, now):
         ga = self.goal_anim
@@ -701,11 +814,14 @@ class Show:
             best = max(scored, key=lambda g: g["speed"])
             out.append(("ROCKET", "fastest goal", best["name"], f"{best['speed']:.0f} cm/s",
                         L.fill(L.AWARD_ROCKET, who=best["name"], v=best["speed"])))
+        two = self.game == 2
         if self.stats.ai_saves:
-            out.append(("THE WALL", "shots saved by the AI", self.ai_name(), f"{self.stats.ai_saves} saves",
-                        L.fill(L.AWARD_WALL, ai=self.ai_name(), n=self.stats.ai_saves)))
-        if self.score["H"] >= 3:
-            out.append(("HAT-TRICK HERO", "3+ goals vs the machine", self.player(), f"{self.score['H']} goals", None))
+            out.append(("THE WALL", "shots saved by player 2" if two else "shots saved by the AI", self.ai_name(),
+                        f"{self.stats.ai_saves} saves", L.fill(L.AWARD_WALL, ai=self.ai_name(), n=self.stats.ai_saves)))
+        for who in ("H", "A") if two else ("H",):
+            if self.score[who] >= 3:
+                out.append(("HAT-TRICK HERO", "3+ goals" if two else "3+ goals vs the machine", self.name_of(who),
+                            f"{self.score[who]} goals", None))
         if self.stats.longest_rally >= 3:
             out.append(("LONGEST RALLY", "hits in one rally", "BOTH", f"{self.stats.longest_rally} hits", None))
         return out[:3]
@@ -744,9 +860,7 @@ class Show:
             self._scene_card(canvas, t, arg)
         elif name == "replay":
             if first:
-                pl, ai = self.player(), self.ai_name()
-                self.voice.say(L.pick(L.GOAL_H if arg["who"] == "H" else L.GOAL_A, p=pl, ai=ai),
-                               priority=2, max_age=4)
+                self.voice.say(self._goal_line(arg["who"]), priority=2, max_age=4)
             self._scene_replay(canvas, t, arg, now)
         elif name == "awards":
             self._scene_awards(canvas, t, arg, first)
@@ -854,9 +968,10 @@ class Show:
         G.text(canvas, who.upper(), W // 2, 210, "display", 120, G.WHITE, "c", glow=col,
                scale=0.4 + 0.6 * G.ease_out_back(t / 0.6), stroke=1)
         G.text(canvas, f"{h}  -  {a}", W // 2, 330, "score", 90, G.WHITE, "c", alpha=G.clamp01((t - 0.4) / 0.4))
-        self._draw_leaderboard(canvas, W // 2 - 380, 410, 760, 7, highlight=self.result_row,
-                               alpha=G.clamp01((t - 0.9) / 0.5))
-        G.text(canvas, "r replay highlights   ·   ENTER next match   ·   n new player   ·   k kick off",
+        if self.game == 1:          # the leaderboard is only for games vs the AI
+            self._draw_leaderboard(canvas, W // 2 - 380, 410, 760, 7, highlight=self.result_row,
+                                   alpha=G.clamp01((t - 0.9) / 0.5))
+        G.text(canvas, "r replay highlights   ·   ENTER rematch   ·   n new game",
                W // 2, H - 30, "ui_light", 20, G.DIM, "c")
 
     def _draw_leaderboard(self, canvas, x, y, w, n, highlight=None, alpha=1.0):

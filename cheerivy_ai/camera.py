@@ -82,7 +82,7 @@ class SimArena:
     MARGIN = 70
     CARRIAGE_SPEED = 30.0  # cm/s, from the project plan
 
-    def __init__(self):
+    def __init__(self, match_seconds=60):
         from arena import Arena
         s = C.PX_PER_CM
         self.arena = Arena()
@@ -105,7 +105,13 @@ class SimArena:
         self.t = time.time()
         self.seq = 0
         self.stats = {"blocked": 0, "conceded": 0}
-        self.lines = []            # fake ATmega status lines ("G H" / "G A") for the live show
+        self.lines = []            # fake ATmega status lines for the live show
+        # Fake firmware lobby: "READY" every second until the laptop sends '1'/'2' + 'K'.
+        self.match_seconds = match_seconds
+        self.game = 1
+        self.in_match = False
+        self.match_end = 0.0
+        self.next_ready = 0.0
         self._serve()
 
     def _draw_static(self):
@@ -149,6 +155,15 @@ class SimArena:
             self.fire_until = time.time() + 0.09
         elif cmd in "LRS":
             self.cmd = cmd
+        elif cmd in "12":
+            self.game = int(cmd)
+        elif cmd == "K" and not self.in_match:
+            self.in_match = True
+            self.match_end = time.time() + self.match_seconds
+            self.lines.append(f"START LEVEL 2 {self.game}P")
+        elif cmd == "E" and self.in_match:
+            self.in_match = False
+            self.lines.append("END")
 
     def _step(self, dt):
         r = C.BALL_RADIUS
@@ -161,11 +176,12 @@ class SimArena:
             self.stats["blocked"] += 1
         if self.by < 0:
             self.stats["conceded"] += 1
-            self.lines.append("G H")               # past the AI: the human scores
+            if self.in_match:
+                self.lines.append("G H")           # past the AI: the human scores
             self._serve()
         elif self.by > C.ARENA_H - C.CARRIAGE_DEPTH or time.time() - self.served > 4:
             human_x = C.X0 + C.BASE_W / 2           # the human carriage never moves in the sim
-            if self.by > C.ARENA_H - C.CARRIAGE_DEPTH and abs(self.bx - human_x) > C.CARRIAGE_W / 2 + r:
+            if self.in_match and self.by > C.ARENA_H - C.CARRIAGE_DEPTH and abs(self.bx - human_x) > C.CARRIAGE_W / 2 + r:
                 self.lines.append("G A")           # got past the human's carriage: the AI scores
             self._serve()                           # back at the human: serve a new shot
         d = {"L": -1, "R": 1}.get(self.cmd, 0) * self.CARRIAGE_SPEED * dt
@@ -175,6 +191,12 @@ class SimArena:
         now = time.time()
         dt = min(now - self.t, 0.05)
         self.t = now
+        if self.in_match and now >= self.match_end:
+            self.in_match = False
+            self.lines.append("END")
+        if not self.in_match and now >= self.next_ready:
+            self.next_ready = now + 1.0
+            self.lines.append("READY")
         self._step(dt)
         s = C.PX_PER_CM
         flat = self.background.copy()
