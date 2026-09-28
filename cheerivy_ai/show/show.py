@@ -52,6 +52,7 @@ CHAT_BIG_GAP_S = 1.5  #   ... but a milestone (5-touch rally, 3 saves) only need
 CHAT_SHOT_P = 0.35    # chance of a build-up line ("Here it comes!") on a new shot
 CHAT_LOST_S = 2.5     # ball out of sight this long -> "Where is it?"
 CHAT_REST_S = 6.0     # ball resting this long -> a quiet line ("A moment to breathe.")
+CHAT_RALLY_GAP_S = 25.0  # rally call-outs at most this often
 RALLY_BREAK_S = 2.0   # ball gone or still this long = the rally is over
 CHAT_REPLY_S = 10.0   # a goal this soon after conceding one -> "The reply! Instant!"
 END_GRACE_S = 4.0          # clock hit 0 but no END line -> end the match ourselves
@@ -575,10 +576,9 @@ class Show:
 
         if st.ai_saves > c["saves"] and st.ai_saves in (3, 5):
             line, big = self.bank.exact("cb_sv3" if st.ai_saves == 3 else "cb_sv5"), True
-        elif st.rally > c["rally"] and st.rally in (5, 8, 12):
-            line, big = self.bank.exact(f"rally_{st.rally:02d}"), True
-        elif st.rally > c["rally"] and st.rally == 16:
-            line, big = self.bank.exact("rally_gen"), True
+        elif st.rally > c["rally"] and st.rally in (5, 8, 12, 16) and now - c.get("rally_t", 0) > CHAT_RALLY_GAP_S:
+            c["rally_t"] = now
+            line, big = self.bank.exact("rally_gen" if st.rally == 16 else f"rally_{st.rally:02d}"), True
         elif bounced and random.random() < 0.6:
             line = self.bank.line(["wall_"], self.game)
         elif new_shot and random.random() < CHAT_SHOT_P:
