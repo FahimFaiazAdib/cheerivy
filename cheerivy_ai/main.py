@@ -30,6 +30,7 @@ import cv2
 import numpy as np
 
 import config as C
+from goals import GoalWatcher
 from calibrate import Calibration, run_calibration
 from camera import Camera, SimArena
 from controller import Controller
@@ -128,6 +129,9 @@ def main():
         cv2.resizeWindow(show_win, 1280, 720)
         show_phase = show.phase
 
+    goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
+    cam_score = {"H": 0, "A": 0}
+    in_match = False
     try:
         while True:
             frame, stamp, seq = source.read()
@@ -162,8 +166,29 @@ def main():
             for line in mcu_lines:
                 if line != "READY" and not (args.sim and line.startswith("G ")):
                     print("[mcu]", line)
+                if line.startswith("G ") and goals and not args.sim:
+                    goals = None
+                    print("[goal] the robot's goal sensors work -> camera goal detection OFF")
+                if line.startswith("START"):
+                    in_match = True
+                elif line.startswith("END"):
+                    in_match = False
+                elif line.startswith("T "):
+                    in_match = True
                 if show:
                     show.on_line(line)
+
+            # Camera goals (until the laser sensors are wired): only during a match.
+            if goals and in_match:
+                who = goals.update(stamp, ball, pred.vy)
+                if who:
+                    cam_score[who] += 1
+                    print(f"[goal] camera: {'HUMAN' if who == 'H' else 'AI'} scores  "
+                          f"({cam_score['H']} - {cam_score['A']})")
+                    if show:
+                        show.on_line(f"G {who} {cam_score['H']} {cam_score['A']}")
+            if goals and any(x.startswith("START") for x in mcu_lines):
+                goals, cam_score = GoalWatcher(), {"H": 0, "A": 0}     # new match: 0 - 0
 
             if show:
                 show.link_state = link.mode
