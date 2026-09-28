@@ -8,6 +8,7 @@ B1 — Frame sources.
               that obeys the L/R/S commands — test everything with no hardware.
 """
 import random
+import sys
 import threading
 import time
 
@@ -16,11 +17,16 @@ import numpy as np
 
 import config as C
 
+# Native camera system per OS: AVFoundation on Mac, DirectShow on Windows (opens fast, works
+# with Iriun / DroidCam), whatever OpenCV picks elsewhere.
+BACKEND = (cv2.CAP_AVFOUNDATION if sys.platform == "darwin"
+           else cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY)
+
 
 def list_cameras(max_index=4):
     found = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
+        cap = cv2.VideoCapture(i, BACKEND)
         if cap.isOpened() and cap.read()[0]:
             found.append(i)
         cap.release()
@@ -34,12 +40,13 @@ class Camera:
             if not cams:
                 raise RuntimeError(
                     "No camera found.\n"
-                    "  1. Allow camera access: System Settings > Privacy & Security > Camera > turn on Terminal\n"
-                    "  2. Is the phone connected (iPhone Continuity Camera / DroidCam USB)?")
-            # Index 0 is usually the MacBook's own webcam; the phone is usually the last one.
+                    "  1. Allow camera access (Mac: System Settings > Privacy & Security > Camera > Terminal;\n"
+                    "     Windows: Settings > Privacy > Camera > let desktop apps use the camera)\n"
+                    "  2. Is the phone connected (Iriun / DroidCam / iPhone Continuity Camera)?")
+            # Index 0 is usually the laptop's own webcam; the phone is usually the last one.
             index = cams[-1]
             print(f"[camera] found {cams}, using index {index} (override with --cam N)")
-        self.cap = cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
+        self.cap = cv2.VideoCapture(index, BACKEND)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_W)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_H)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

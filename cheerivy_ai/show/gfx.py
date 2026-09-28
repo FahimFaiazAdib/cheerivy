@@ -26,17 +26,24 @@ CYAN = (255, 230, 90)
 MAGENTA = (220, 80, 240)
 
 # ---------------------------------------------------------------- fonts
+# Mac fonts first, then the closest Windows fonts (C:\Windows\Fonts), so the show looks the same on both.
+_WIN = "C:/Windows/Fonts/"
 _FONT_CANDIDATES = {
     "display": [("/System/Library/Fonts/Supplemental/Futura.ttc", "Condensed ExtraBold"),
-                ("/System/Library/Fonts/Supplemental/Impact.ttf", None)],
+                ("/System/Library/Fonts/Supplemental/Impact.ttf", None),
+                (_WIN + "bahnschrift.ttf", None), (_WIN + "impact.ttf", None)],
     "impact": [("/System/Library/Fonts/Supplemental/Impact.ttf", None),
-               ("/System/Library/Fonts/Supplemental/Arial Black.ttf", None)],
+               ("/System/Library/Fonts/Supplemental/Arial Black.ttf", None),
+               (_WIN + "impact.ttf", None), (_WIN + "ariblk.ttf", None)],
     "score": [("/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf", None),
-              ("/System/Library/Fonts/Supplemental/Impact.ttf", None)],
+              ("/System/Library/Fonts/Supplemental/Impact.ttf", None),
+              (_WIN + "bahnschrift.ttf", None), (_WIN + "impact.ttf", None)],
     "ui": [("/System/Library/Fonts/Avenir Next.ttc", "Demi Bold"),
-           ("/System/Library/Fonts/Helvetica.ttc", None)],
+           ("/System/Library/Fonts/Helvetica.ttc", None),
+           (_WIN + "seguisb.ttf", None), (_WIN + "segoeuib.ttf", None), (_WIN + "arialbd.ttf", None)],
     "ui_light": [("/System/Library/Fonts/Avenir Next.ttc", "Medium"),
-                 ("/System/Library/Fonts/Helvetica.ttc", None)],
+                 ("/System/Library/Fonts/Helvetica.ttc", None),
+                 (_WIN + "segoeui.ttf", None), (_WIN + "arial.ttf", None)],
 }
 
 

@@ -406,23 +406,24 @@ class Show:
             self.layout = self._make_layout(frame.shape)
 
         self._timers(now)
+        phase = self.phase          # read once: key presses change it from the main thread mid-frame
         canvas = self.base_bg.copy()
-        need_stage = self.phase in (CONNECT, MENU, NAMES, WAITING, LIVE) or self.recorder.pending
+        need_stage = phase in (CONNECT, MENU, NAMES, WAITING, LIVE) or self.recorder.pending
         stage = None
         if need_stage:
             stage = self._draw_stage(frame, flat, tele, trail, now)
-            if self.phase == LIVE or self.recorder.pending:
+            if phase == LIVE or self.recorder.pending:
                 self.recorder.push(stage, now)
 
-        if self.phase in (CONNECT, MENU, NAMES):
+        if phase in (CONNECT, MENU, NAMES):
             self._draw_blurred_stage(canvas, stage)
-            {CONNECT: self._draw_connect, MENU: self._draw_menu, NAMES: self._draw_names}[self.phase](canvas, now)
-        elif self.phase in (WAITING, LIVE):
+            {CONNECT: self._draw_connect, MENU: self._draw_menu, NAMES: self._draw_names}[phase](canvas, now)
+        elif phase in (WAITING, LIVE):
             lo = self.layout
             canvas[lo["stage_y"]:lo["stage_y"] + stage.shape[0], lo["stage_x"]:lo["stage_x"] + stage.shape[1]] = stage
             self._draw_header(canvas, now)
             self._draw_footer(canvas, tele, now)
-            if self.phase == WAITING:
+            if phase == WAITING:
                 self._draw_waiting(canvas, now)
             self._draw_pip(canvas, now)
             self._draw_goal_anim(canvas, now)

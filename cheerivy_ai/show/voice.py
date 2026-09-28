@@ -3,10 +3,12 @@ Voice commentary: Kokoro TTS, British voice "bm_george".
 
 Kokoro needs Python <= 3.12, so it runs as a small worker process (voice_server.py)
 started through `uv`. Loading takes a while, so until it is ready (or if it can't start)
-lines are spoken with macOS `say` (voice Daniel) instead.
+lines are spoken with the system voice instead: macOS `say` (voice Daniel) on a Mac,
+the built-in Windows voice (System.Speech through PowerShell) on Windows.
 
-Every line is rendered to a WAV in show/cache/voice/ and reused, so the same line is only
-synthesised once. The same files can go into the exported highlight video later.
+Every line is rendered to a sound file in show/cache/voice/ and reused, so the same line is
+only synthesised once. The same files can go into the exported highlight video later.
+Playback: `afplay` on a Mac, `winsound` on Windows.
 """
 import hashlib
 import json
@@ -14,13 +16,44 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
+import wave
+
+IS_WIN = sys.platform == "win32"
+if IS_WIN:
+    import winsound
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache", "voice")
 KOKORO_VOICE = "bm_george"
 FALLBACK_VOICE = "Daniel"     # macOS British male voice
+FALLBACK_NAME = "Windows voice" if IS_WIN else "macOS say"
+FALLBACK_EXT = "wav" if IS_WIN else "aiff"
+
+
+def _system_tts(text, out):
+    """Render `text` to the file `out` with the operating system's own voice. Raises on failure."""
+    if IS_WIN:
+        q = lambda s: s.replace("'", "''")            # PowerShell single-quote escaping
+        ps = ("Add-Type -AssemblyName System.Speech;"
+              "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+              "try { $s.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Male) } catch {};"
+              f"$s.SetOutputToWaveFile('{q(out)}'); $s.Speak('{q(text)}'); $s.Dispose()")
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                       timeout=20, check=True, capture_output=True, creationflags=0x08000000)  # no console window
+    else:
+        subprocess.run(["say", "-v", FALLBACK_VOICE, "-r", "185", "-o", out, text],
+                       timeout=15, check=True, capture_output=True)
+
+
+def _wav_seconds(path):
+    try:
+        with wave.open(path) as w:
+            return w.getnframes() / float(w.getframerate())
+    except (OSError, wave.Error, EOFError):
+        return 3.0
 
 
 def _find_uv():
@@ -41,7 +74,8 @@ class Voice:
         self._done = {}               # out path -> threading.Event
         self._play_q = queue.PriorityQueue()
         self._seq = 0
-        self._current = None          # running afplay process
+        self._current = None          # running afplay process (Mac)
+        self._win_stop = threading.Event()   # set by hush() to cut a Windows line short
         self._stop = False
         os.makedirs(CACHE, exist_ok=True)
         if not enabled:
@@ -49,14 +83,14 @@ class Voice:
         if use_kokoro:
             threading.Thread(target=self._start_kokoro, daemon=True).start()
         else:
-            self.status = "macOS say"
+            self.status = FALLBACK_NAME
         threading.Thread(target=self._player, daemon=True).start()
 
     # ------------------------------------------------------------ Kokoro worker
     def _start_kokoro(self):
         uv = _find_uv()
         if not uv:
-            self.status = "macOS say (uv not found)"
+            self.status = f"{FALLBACK_NAME} (uv not found)"
             return
         cmd = [uv, "run", "--quiet", "--python", "3.12", "--with", "kokoro", "--with", "soundfile",
                "python", os.path.join(HERE, "voice_server.py")]
@@ -65,7 +99,7 @@ class Voice:
             self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
                                           text=True, bufsize=1, env={**os.environ, "HF_HUB_OFFLINE": "1"})
         except OSError as e:
-            self.status = f"macOS say ({e})"
+            self.status = f"{FALLBACK_NAME} ({e})"
             return
         self.status = "loading George..."
         for line in self._proc.stdout:
@@ -83,12 +117,12 @@ class Voice:
                     ev.set()
         self.ready = False
         if not self._stop:
-            self.status = "macOS say (Kokoro stopped, see show/cache/voice_server.log)"
+            self.status = f"{FALLBACK_NAME} (Kokoro stopped, see show/cache/voice_server.log)"
 
     # ------------------------------------------------------------ synthesis
     def _path(self, text, engine):
         h = hashlib.sha1(f"{engine}|{KOKORO_VOICE}|{self.speed}|{text}".encode()).hexdigest()[:16]
-        return os.path.join(CACHE, f"{h}.{'wav' if engine == 'kokoro' else 'aiff'}")
+        return os.path.join(CACHE, f"{h}.{'wav' if engine == 'kokoro' else FALLBACK_EXT}")
 
     def cached(self, text):
         """Path of an already-rendered file for this line (Kokoro preferred), else None."""
@@ -145,9 +179,8 @@ class Voice:
             return r[0]
         out = self._path(text, "say")
         try:
-            subprocess.run(["say", "-v", FALLBACK_VOICE, "-r", "185", "-o", out, text],
-                           timeout=15, check=True, capture_output=True)
-            return out
+            _system_tts(text, out)
+            return out if os.path.exists(out) else None
         except (OSError, subprocess.SubprocessError):
             return None
 
@@ -168,9 +201,26 @@ class Voice:
                 self._play_q.get_nowait()
         except queue.Empty:
             pass
+        if IS_WIN:
+            self._win_stop.set()
+            try:
+                winsound.PlaySound(None, 0)           # stop whatever is playing
+            except RuntimeError:
+                pass
+            return
         p = self._current
         if p and p.poll() is None:
             p.terminate()
+
+    def _play(self, path):
+        """Play one file and return when it's done (or cut short by hush())."""
+        if IS_WIN:
+            self._win_stop.clear()
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            self._win_stop.wait(_wav_seconds(path) + 0.1)
+            return
+        self._current = subprocess.Popen(["afplay", path])
+        self._current.wait()
 
     def _player(self):
         while not self._stop:
@@ -182,9 +232,8 @@ class Voice:
             if not path or time.time() - created > max_age:
                 continue
             try:
-                self._current = subprocess.Popen(["afplay", path])
-                self._current.wait()
-            except OSError:
+                self._play(path)
+            except (OSError, RuntimeError):
                 pass
 
     def close(self):

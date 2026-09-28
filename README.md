@@ -43,5 +43,25 @@ python3 main.py --no-send   # real camera, tracking only
 python3 main.py --no-show   # real camera + robot, AI window only
 ```
 
-Needs `pip install opencv-python numpy pyserial`. Board measurements are in `cheerivy_ai/config.py`
-(see `cheerivy_ai/measurements.svg`). Run the tests with `cd cheerivy_ai && python3 -m unittest test_predictor`.
+Install the packages with `python3 -m pip install -r cheerivy_ai/requirements.txt`. Board measurements are in
+`cheerivy_ai/config.py` (see `cheerivy_ai/measurements.svg`). Run the tests with
+`cd cheerivy_ai && python3 -m unittest test_predictor`.
+
+### Running on Windows
+
+1. Install **Python 3.10 or newer** from python.org (tick **"Add python.exe to PATH"**).
+2. Install **Iriun Webcam** (or DroidCam) on the PC and the phone.
+3. Pair the HC-05 (or "CHEERIVY") in **Settings → Bluetooth** (PIN `1234` or `0000`).
+4. In Command Prompt, inside the `cheerivy` folder:
+   ```
+   python -m pip install -r cheerivy_ai\requirements.txt
+   cd cheerivy_ai
+   python main.py --sim        (test without the robot)
+   python main.py              (real robot)
+   ```
+- **Camera:** if the laptop's own webcam opens, quit with `q` and try `python main.py --cam 1`.
+- **Calibration:** `calib.json` is not shared, so the first run asks you to click the board corners.
+- **Bluetooth:** found automatically. If not, look up the port in
+  *Device Manager → Ports (COM & LPT)* ("Standard Serial over Bluetooth link", the **outgoing** one) and run
+  `python main.py --port COM5` with your number.
+- **Voice:** the commentary uses the built-in Windows voice.

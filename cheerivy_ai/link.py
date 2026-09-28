@@ -16,12 +16,25 @@ import serial.tools.list_ports
 import config as C
 
 
+USB_SERIAL = ("usbserial", "wchusb", "slab", "ch340", "cp210", "ft232", "usb-serial", "usb serial")
+
+
+def _windows_bt_outgoing(p):
+    """Windows shows a paired HC-05 as TWO "Standard Serial over Bluetooth link" COM ports.
+    The outgoing one (the one to open) carries the module's address in its hardware id;
+    the incoming one has 000000000000 there."""
+    hwid = (p.hwid or "").upper()
+    return "BTHENUM" in hwid and "000000000000" not in hwid
+
+
 def find_port():
     for p in serial.tools.list_ports.comports():
         name = f"{p.device} {p.description}".lower()
         if "incoming-port" in name or "bluetooth-modem" in name:
             continue
-        if any(k in name for k in ("hc-05", "hc05", "hc-06", "cheerivy", "usbserial", "wchusb", "slab")):
+        if any(k in name for k in ("hc-05", "hc05", "hc-06", "cheerivy") + USB_SERIAL):
+            return p.device
+        if _windows_bt_outgoing(p):
             return p.device
     return None
 
