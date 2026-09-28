@@ -34,7 +34,8 @@
  *    'L' 'R' 'S' move/stop AI carriage   'F' fire AI servo   'Z' freeze the human
  *      (these are echoed back in lowercase)
  *    '1' / '2'   choose single player / two players (lobby)   'K' kick off   'E' end the match now
- *    No byte for LINK_TIMEOUT_MS -> Mirror AI takes over (falling tone); link back -> rising tone.
+ *    No byte for LINK_HOLD_MS (0.4 s) -> AI carriage stops and waits; for LINK_TIMEOUT_MS (1.5 s) ->
+ *    Mirror AI takes over (falling tone); link back -> rising tone.
  *
  *  Lines sent to the laptop:  "READY" (every second in the lobby)
  *    "START LEVEL n 1P|2P"   "T <seconds left> CAM|MIR|P2"
@@ -55,7 +56,10 @@
 #define JOY_HIGH               650   /* X above = right, Y above = fire */
 #define FREEZE_MS              3000
 #define FREEZE_COOLDOWN_MS     15000
-#define LINK_TIMEOUT_MS        400   /* laptop silent this long -> Mirror AI */
+#define LINK_TIMEOUT_MS        1500  /* laptop silent this long -> Mirror AI. Windows Bluetooth
+                                        delivers bytes in bursts with gaps > 0.4 s, so be patient */
+#define LINK_HOLD_MS           400   /* silent this long (but not yet timed out): AI carriage stops
+                                        and waits instead of driving on a stale command */
 #define MIRROR_SIGN            (+1)  /* set to -1 if Mirror AI moves OPPOSITE to the human */
 #define P2_DIR_SIGN            (+1)  /* set to -1 if player 2's carriage moves opposite to their joystick */
 #define MIRROR_FIRE_DELAY_MS   550   /* ~ball travel time from human flipper to AI */
@@ -516,6 +520,7 @@ static void play_match(uint8_t game, uint8_t level) {
         rx_fire = rx_freeze = 0;        /* the laptop AI is only watching in 2P */
       } else if (link_up) {
         ai_dir = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
+        if (now - last_rx >= LINK_HOLD_MS) ai_dir = 0;   /* laptop quiet for a moment: wait, don't guess */
         if (rx_fire) { rx_fire = 0; servo_fire(SERVO_AI, now); }
         if (rx_freeze) {
           rx_freeze = 0;
