@@ -20,6 +20,11 @@ class Controller:
         self._aim_error = 0.0
         self._will_fire = True
         self._in_shot = False
+        # Where the carriage can really go. Starts from the measured rail, shrinks when the
+        # carriage is driven against an end and stops moving (camera calibration is never exact).
+        self.rail_lo, self.rail_hi = C.CARRIAGE_MIN_X, C.CARRIAGE_MAX_X
+        self.motor_speed = C.MOTOR_SPEED_CM_S   # learned while playing
+        self._move_cmd, self._move_end, self._wait_end, self._move_from = "S", 0.0, 0.0, None
 
     def set_difficulty(self, level):
         self.level = level
@@ -55,7 +60,7 @@ class Controller:
                 desired = self.centre if pos is None else 0.5 * pos[0] + 0.5 * self.centre
                 status = "TRACKING" if pos else "NO BALL"
 
-        desired = min(max(desired, C.CARRIAGE_MIN_X), C.CARRIAGE_MAX_X)  # rail limits
+        desired = min(max(desired, self.rail_lo + C.RAIL_MARGIN_CM), self.rail_hi - C.RAIL_MARGIN_CM)
 
         # Reaction delay: the new target only takes effect after `delay` seconds.
         if self.delay and abs(desired - self.target) > 2:
@@ -71,9 +76,45 @@ class Controller:
         if carriage_x is None:
             return "S", False, "CARRIAGE NOT SEEN (left-click the carriage tape)"
 
-        err = self.target - carriage_x
-        band = C.DEADBAND_CM if self.moving != "S" else C.DEADBAND_CM + C.HYSTERESIS_CM
-        self.moving = "S" if abs(err) < band else ("R" if err > 0 else "L")
+        # The carriage can never be outside the rail it was seen on: widen the limits if needed.
+        self.rail_lo = min(self.rail_lo, carriage_x)
+        self.rail_hi = max(self.rail_hi, carriage_x)
+
+        # Timed moves. The camera and Bluetooth lag behind, so "drive until the camera says stop"
+        # always overshoots (a full-speed carriage travels speed x delay before the stop lands).
+        # Instead: drive for distance / motor speed seconds, stop, wait until the camera shows where
+        # it really ended up, correct. Start and stop are delayed equally, so the timing holds.
+        if now < self._move_end:
+            cmd = self._move_cmd
+        elif now < self._wait_end:
+            cmd = "S"
+        else:
+            if self._move_from is not None:            # a move just settled: learn from it
+                x_from, dur, d = self._move_from
+                moved = (carriage_x - x_from) * (1 if d == "R" else -1)
+                if dur >= 0.06 and moved < C.STALL_MOVE_CM and (
+                        carriage_x > self.centre + 5 if d == "R" else carriage_x < self.centre - 5):
+                    if d == "R":                       # drove but didn't move: that's the real rail end
+                        self.rail_hi = carriage_x
+                    else:
+                        self.rail_lo = carriage_x
+                    print(f"[ai] rail end at {carriage_x:.1f} cm -> rail {self.rail_lo:.1f} .. {self.rail_hi:.1f}")
+                elif dur >= 0.08 and moved > C.STALL_MOVE_CM:
+                    v = min(max(moved / dur, 5.0), 200.0)
+                    self.motor_speed = 0.6 * self.motor_speed + 0.4 * v
+                self._move_from = None
+            err = self.target - carriage_x
+            band = C.DEADBAND_CM if self.moving != "S" else C.DEADBAND_CM + C.HYSTERESIS_CM
+            cmd = "S" if abs(err) < band else ("R" if err > 0 else "L")
+            if (cmd == "R" and carriage_x >= self.rail_hi - 0.3) or (cmd == "L" and carriage_x <= self.rail_lo + 0.3):
+                cmd = "S"                               # already at that end of the rail
+            if cmd != "S":
+                dur = min(max(abs(err) / self.motor_speed, C.MIN_MOVE_S), C.MAX_MOVE_S)
+                self._move_cmd = cmd
+                self._move_end = now + dur
+                self._wait_end = self._move_end + C.SETTLE_S
+                self._move_from = (carriage_x, dur, cmd)
+        self.moving = cmd
 
         fire = (x_hit is not None and self._will_fire
                 and t_hit <= C.FIRE_LEAD_S

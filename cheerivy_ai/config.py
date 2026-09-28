@@ -71,6 +71,12 @@ SYSTEM_LATENCY_S = 0.07    # camera + processing + Bluetooth (HC-05)
 # ---------------------------------------------------------------- control
 DEADBAND_CM = 1.5       # stop when |target - carriage| below this
 HYSTERESIS_CM = 1.0     # extra margin before starting to move again
+MOTOR_SPEED_CM_S = 30.0 # first guess of the carriage speed; the AI measures the real one while playing
+MIN_MOVE_S = 0.04       # shortest drive pulse
+MAX_MOVE_S = 0.6        # longest drive before looking again
+SETTLE_S = 0.3          # after each move: wait this long so the camera shows where the carriage stopped
+STALL_MOVE_CM = 0.7     # a move shorter than this near a rail end = the carriage is at the end
+RAIL_MARGIN_CM = 1.0    # never aim closer than this to a rail end
 FIRE_REACH_CM = CARRIAGE_W / 2  # flipper covers carriage_x ± this
 FIRE_LEAD_S = 0.12      # fire this long before predicted arrival (servo swing time)
 FIRE_COOLDOWN_S = 0.6

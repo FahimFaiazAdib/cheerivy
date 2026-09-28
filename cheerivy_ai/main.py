@@ -71,7 +71,8 @@ def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paus
     lines = [status,
              f"CMD {cmd}  | {link.mode}{f' echo {link.echo_count}' if link.ser else ''}{' L/R SWAPPED' if link.swap else ''} | level {ctrl.level} | {fps:4.1f} fps",
              f"ball {'--' if not ball else f'{ball[0]:4.1f},{ball[1]:4.1f}'} cm  v={speed:4.0f} cm/s",
-             f"carriage {'--' if carriage_x is None else f'{carriage_x:4.1f}'} cm  target {ctrl.target:4.1f}"]
+             f"carriage {'--' if carriage_x is None else f'{carriage_x:4.1f}'} cm  target {ctrl.target:4.1f}",
+             f"motor {ctrl.motor_speed:3.0f} cm/s  rail {ctrl.rail_lo:4.1f}..{ctrl.rail_hi:4.1f} cm"]
     panel = np.zeros((22 * len(lines) + 10, w, 3), np.uint8)
     for i, t in enumerate(lines):
         cv2.putText(panel, t, (8, 22 * (i + 1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
