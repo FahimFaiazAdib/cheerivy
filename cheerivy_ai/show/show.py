@@ -531,7 +531,7 @@ class Show:
             for n in range(10, 0, -1):          # "Ten! Nine! ... One!"
                 if left <= n + 0.2 and f"cd{n}" not in self.said:
                     self.said.update(f"cd{m}" for m in range(n, 11))
-                    self.voice.play(self.bank.countdown(n), priority=2, max_age=0.8)
+                    self.voice.play(self.bank.countdown(n), priority=2, max_age=1.0, gap=False)
                     break
         elif left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
             self.said.add("60")

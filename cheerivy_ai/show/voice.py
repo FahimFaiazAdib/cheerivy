@@ -56,6 +56,41 @@ def _wav_seconds(path):
         return 3.0
 
 
+CLIP_GAP_S = 0.14     # pause between clips of one sequence (name -> line -> score)
+LINE_GAP_S = 0.35     # breath between two separate lines
+WIN_MARGIN_S = 0.25   # Windows takes a moment to start a sound: wait this much longer than the clip
+
+
+def _join(paths):
+    """Glue a sequence of recorded clips into ONE wav with short natural pauses, so nothing is cut
+    between them (starting a new sound on Windows stops the one still playing). Cached by content."""
+    key = hashlib.sha1("|".join(paths).encode()).hexdigest()[:16]
+    out = os.path.join(CACHE, f"seq_{key}.wav")
+    if os.path.exists(out):
+        return out
+    frames, params = [], None
+    try:
+        for p in paths:
+            with wave.open(p) as w:
+                pr = (w.getnchannels(), w.getsampwidth(), w.getframerate())
+                if params and pr != params:
+                    return None                    # different formats: play one by one instead
+                params = pr
+                if frames:
+                    frames.append(b"\0" * int(pr[2] * CLIP_GAP_S) * pr[0] * pr[1])
+                frames.append(w.readframes(w.getnframes()))
+        tmp = out + ".tmp"
+        with wave.open(tmp, "wb") as w:
+            w.setnchannels(params[0])
+            w.setsampwidth(params[1])
+            w.setframerate(params[2])
+            w.writeframes(b"".join(frames))
+        os.replace(tmp, out)
+        return out
+    except (OSError, wave.Error, EOFError, TypeError):
+        return None
+
+
 def _find_uv():
     for p in (shutil.which("uv"), os.path.expanduser("~/.local/bin/uv"), "/opt/homebrew/bin/uv"):
         if p and os.path.exists(p):
@@ -195,14 +230,15 @@ class Voice:
         self._seq += 1
         self._play_q.put((priority, self._seq, time.time(), max_age, text))
 
-    def play(self, paths, priority=5, max_age=4.0, interrupt=False):
-        """Queue recorded clips (e.g. a name, then a line), played back to back as one item."""
+    def play(self, paths, priority=5, max_age=4.0, interrupt=False, gap=True):
+        """Queue recorded clips (e.g. a name, then a line), played back to back as one item.
+        gap=False: no breath afterwards (the countdown, one number per second)."""
         if not self.enabled or not paths:
             return
         if interrupt:
             self.hush()
         self._seq += 1
-        self._play_q.put((priority, self._seq, time.time(), max_age, tuple(paths)))
+        self._play_q.put((priority, self._seq, time.time(), max_age, (gap,) + tuple(paths)))
 
     def hush(self):
         """Stop the current line and forget queued ones."""
@@ -228,7 +264,7 @@ class Voice:
         if IS_WIN:
             self._win_stop.clear()
             winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-            self._win_stop.wait(_wav_seconds(path) + 0.1)
+            self._win_stop.wait(_wav_seconds(path) + WIN_MARGIN_S)
             return
         self._current = subprocess.Popen(["afplay", path])
         self._current.wait()
@@ -243,13 +279,17 @@ class Voice:
                 if time.time() - created > max_age:
                     continue
                 gen = self._gen
-                for path in text:
+                gap, text = text[0], text[1:]
+                joined = _join(list(text)) if len(text) > 1 else text[0]
+                for path in ([joined] if joined else text):
                     if gen != self._gen or self._stop:    # hush() arrived: drop the rest
                         break
                     try:
                         self._play(path)
                     except (OSError, RuntimeError):
                         pass
+                if gap and gen == self._gen:
+                    time.sleep(LINE_GAP_S)                # a breath before the next line
                 continue
             path = self.render(text, wait=max(1.0, max_age - (time.time() - created)))
             if not path or time.time() - created > max_age:
