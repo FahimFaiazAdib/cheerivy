@@ -1,0 +1,522 @@
+/*
+ * CHEERIVY v5 — Human (servo) vs AI (servo), single ATmega32 @ internal 8 MHz
+ *
+ *  HUMAN player                         AI player (red tape on carriage)
+ *  ─────────────────────────            ─────────────────────────────────
+ *  Joystick X   PA1 / pin 39            Motor ch A  AIN1 PC0 / pin 22
+ *  Joystick Y   PA3 / pin 37                        AIN2 PC1 / pin 23
+ *  Freeze btn   PB1 / pin 2                         PWMA PD6 / pin 20
+ *  Motor ch B   BIN1 PC2 / pin 24       Servo        PD4 (OC1B) / pin 18
+ *               BIN2 PC3 / pin 25       Brain: laptop camera via HC-05 (PD0 RXD / pin 14)
+ *               PWMB PC4 / pin 26              or Mirror AI when the laptop is silent
+ *  Servo        PD5 (OC1A) / pin 19
+ *
+ *  Servos (MG90S): both strike at FULL speed (jump straight to the strike angle), hold just
+ *  long enough to finish the swing, return, and only fire again once back at rest.
+ *  At power-on both servos go to REST — attach the human servo's horn in that position.
+ *
+ *  Shared: TB6612 STBY PA4 / pin 36, buzzer PD7 / pin 21, HC-05 TX->pin 14, pin 15->HC-05 RX
+ *  Goals:  Laser receiver A OUT -> PD2 (INT0) / pin 16   beam on the HUMAN goal line -> AI scores
+ *          Laser receiver B OUT -> PD3 (INT1) / pin 17   beam on the AI goal line    -> HUMAN scores
+ *          Receiver OUT is HIGH while it sees the laser; the ball breaks the beam = falling edge.
+ *
+ *  Power-up:
+ *    - hold the FREEZE button while powering on  -> SELF-TEST (motors, both servos)
+ *    - otherwise: difficulty beeps (2 = medium). Press FREEZE within 3 s to change
+ *      1 / 2 / 3 beeps = easy / medium / hard (only affects Mirror AI), then the match starts.
+ *
+ *  Laptop protocol (single bytes, each one is echoed back in lowercase):
+ *    'L' 'R' 'S' move/stop AI carriage   'F' fire AI servo   'Z' freeze the human
+ *    No byte for LINK_TIMEOUT_MS -> Mirror AI takes over (falling tone); link back -> rising tone.
+ *
+ *  Lines sent to the laptop:  "START LEVEL n"   "T <seconds left> CAM|MIR"
+ *    "G H <human> <ai>" human scored   "G A <human> <ai>" AI scored   "END <human> <ai>"
+ */
+#ifndef F_CPU
+#define F_CPU 8000000UL
+#endif
+#include <avr/interrupt.h>
+#include <avr/io.h>
+#include <stdint.h>
+#include <util/atomic.h>
+#include <util/delay.h>
+
+/* ============================================================== TUNING */
+#define MATCH_SECONDS          180
+#define JOY_LOW                350   /* X below this = left            */
+#define JOY_HIGH               650   /* X above = right, Y above = fire */
+#define FREEZE_MS              3000
+#define FREEZE_COOLDOWN_MS     15000
+#define LINK_TIMEOUT_MS        400   /* laptop silent this long -> Mirror AI */
+#define MIRROR_SIGN            (+1)  /* set to -1 if Mirror AI moves OPPOSITE to the human */
+#define MIRROR_FIRE_DELAY_MS   550   /* ~ball travel time from human flipper to AI */
+#define TELEMETRY_MS           1000
+#define GOAL_LOCKOUT_MS        1500  /* ignore the same beam this long after a goal (ball bouncing in the beam) */
+#define SWAP_GOAL_SENSORS      0     /* 1 if goals are credited to the wrong player */
+#define UART_BAUD              9600
+
+static const uint16_t MIRROR_DELAY_MS[3] = {300, 180, 80};  /* easy, medium, hard */
+
+/* ============================================================== SERVO ANGLES + SPEED
+ * Angles in degrees (0..180). The strike angle should go ~20° PAST the point where the arm
+ * touches the ball: a servo slows down near its target, so the ball must be hit mid-swing
+ * while the arm is still at full speed.
+ *
+ * AI servo: already mounted, keep its tested angles (67° swing).
+ * HUMAN servo: not mounted yet. Rest at 90° = centre of the range, so there is room to
+ *   tune either way. Strike 65° away. If it swings the WRONG way once mounted, change
+ *   HUMAN_STRIKE_DEG to 155 (= 90 + 65).                                                  */
+#define AI_REST_DEG            87
+#define AI_STRIKE_DEG          20
+#define HUMAN_REST_DEG         90
+#define HUMAN_STRIKE_DEG       25
+
+/* MG90S: 0.10 s / 60° at 4.8-5 V = 1.6 ms per degree (0.08 s / 60° at 6 V -> use 13).     */
+#define SERVO_MS_PER_DEG_X10   16
+#define SERVO_SETTLE_MS        15    /* start-up + stop time on top of the pure travel time */
+#define SERVO_FRAME_US         20000 /* 50 Hz. 10000 (100 Hz) makes most analog servos snappier;
+                                        go back to 20000 if the servo buzzes or gets hot. */
+
+#define SERVO_US(deg)          (600 + (uint16_t)(deg) * 10)
+#define SWING_DEG(a, b)        ((a) > (b) ? (a) - (b) : (b) - (a))
+#define TRAVEL_MS(a, b)        (SWING_DEG(a, b) * SERVO_MS_PER_DEG_X10 / 10 + SERVO_SETTLE_MS)
+#define AI_TRAVEL_MS           TRAVEL_MS(AI_REST_DEG, AI_STRIKE_DEG)        /* ~122 ms */
+#define HUMAN_TRAVEL_MS        TRAVEL_MS(HUMAN_REST_DEG, HUMAN_STRIKE_DEG)  /* ~119 ms */
+#define HUMAN_CONTACT_MS       (HUMAN_TRAVEL_MS * 2 / 3)  /* ball is hit ~2/3 into the swing */
+
+/* ============================================================== TIME (Timer0, 1 ms) */
+static volatile uint32_t g_ms;
+
+ISR(TIMER0_COMP_vect) { g_ms++; }
+
+static uint32_t millis(void) {
+  uint32_t t;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { t = g_ms; }
+  return t;
+}
+
+/* ============================================================== SERVOS (Timer1, 1 us ticks)
+ * AI    = OC1B / PD4 / pin 18      HUMAN = OC1A / PD5 / pin 19
+ * One strike: jump to STRIKE (full speed) -> hold TRAVEL ms (swing completes) -> jump back to
+ * REST -> ready again after another TRAVEL ms (back at rest, so the next swing is a full one). */
+#define SERVO_AI     0
+#define SERVO_HUMAN  1
+
+static uint32_t servo_back_at[2], servo_ready_at[2];
+static uint8_t servo_out[2];
+
+static void servo_write(uint8_t s, uint16_t us) {   /* direct register writes (16-bit safe) */
+  if (s == SERVO_AI) OCR1B = us; else OCR1A = us;
+}
+
+static void servo_init(void) {
+  DDRD |= (1 << PD4) | (1 << PD5);
+  /* Fast PWM mode 14, TOP = ICR1, prescaler 8 -> 1 us per tick. Both outputs driven. */
+  TCCR1A = (1 << COM1A1) | (1 << COM1B1) | (1 << WGM11);
+  TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);
+  ICR1 = SERVO_FRAME_US;
+  servo_write(SERVO_AI, SERVO_US(AI_REST_DEG));
+  servo_write(SERVO_HUMAN, SERVO_US(HUMAN_REST_DEG));
+}
+
+static uint8_t servo_ready(uint8_t s, uint32_t now) { return now >= servo_ready_at[s]; }
+
+static void servo_fire(uint8_t s, uint32_t now) {
+  if (!servo_ready(s, now)) return;
+  uint16_t travel = (s == SERVO_AI) ? AI_TRAVEL_MS : HUMAN_TRAVEL_MS;
+  servo_write(s, SERVO_US(s == SERVO_AI ? AI_STRIKE_DEG : HUMAN_STRIKE_DEG));
+  servo_out[s] = 1;
+  servo_back_at[s] = now + travel;
+  servo_ready_at[s] = now + 2UL * travel;
+}
+
+static void servo_update(uint32_t now) {
+  for (uint8_t s = 0; s < 2; s++) {
+    if (servo_out[s] && now >= servo_back_at[s]) {
+      servo_write(s, SERVO_US(s == SERVO_AI ? AI_REST_DEG : HUMAN_REST_DEG));
+      servo_out[s] = 0;
+    }
+  }
+}
+
+/* ============================================================== MOTORS (TB6612) */
+static void motors_init(void) {
+  DDRC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC3) | (1 << PC4);
+  DDRD |= (1 << PD6);
+  DDRA |= (1 << PA4);
+  PORTA |= (1 << PA4);                  /* STBY high = driver enabled */
+}
+
+static void motor_ai(int8_t d) {        /* channel A: -1 left, 0 stop, +1 right */
+  if (d < 0)      { PORTC |= (1 << PC0);  PORTC &= ~(1 << PC1); PORTD |= (1 << PD6); }
+  else if (d > 0) { PORTC &= ~(1 << PC0); PORTC |= (1 << PC1);  PORTD |= (1 << PD6); }
+  else            { PORTD &= ~(1 << PD6); }
+}
+
+static void motor_human(int8_t d) {     /* channel B */
+  if (d < 0)      { PORTC |= (1 << PC2);  PORTC &= ~(1 << PC3); PORTC |= (1 << PC4); }
+  else if (d > 0) { PORTC &= ~(1 << PC2); PORTC |= (1 << PC3);  PORTC |= (1 << PC4); }
+  else            { PORTC &= ~(1 << PC4); }
+}
+
+/* ============================================================== JOYSTICK (ADC) */
+static void adc_init(void) {
+  ADMUX = (1 << REFS0);                               /* AVCC reference */
+  ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1); /* /64 -> 125 kHz */
+}
+
+static uint16_t adc_read(uint8_t ch) {
+  ADMUX = (ADMUX & 0xF0) | (ch & 0x0F);
+  ADCSRA |= (1 << ADSC);
+  while (ADCSRA & (1 << ADSC)) {}
+  return ADC;
+}
+
+static uint8_t freeze_btn_down(void) { return !(PINB & (1 << PB1)); }
+
+/* ============================================================== BUZZER (Timer2, non-blocking) */
+typedef struct { uint8_t ocr; uint8_t cs; } Note;   /* ocr 0 = rest; cs = duration in 10 ms */
+
+static const Note SND_START[] = {{75, 10}, {0, 5}, {60, 10}, {0, 5}, {45, 25}};
+static const Note SND_BEEP1[] = {{45, 8}};
+static const Note SND_BEEP2[] = {{45, 8}, {0, 10}, {45, 8}};
+static const Note SND_BEEP3[] = {{45, 8}, {0, 10}, {45, 8}, {0, 10}, {45, 8}};
+static const Note SND_LINK_UP[] = {{70, 6}, {50, 6}, {35, 10}};
+static const Note SND_LINK_DOWN[] = {{35, 6}, {50, 6}, {70, 10}};
+static const Note SND_SIREN[] = {{30, 4}, {70, 4}, {30, 4}, {70, 4}, {30, 4}, {70, 4}, {30, 4}, {70, 4}};
+static const Note SND_TICK[] = {{30, 3}};
+static const Note SND_GOAL_HUMAN[] = {{62, 8}, {49, 8}, {41, 8}, {30, 30}};
+static const Note SND_GOAL_AI[] = {{41, 12}, {49, 12}, {62, 12}, {83, 30}};
+static const Note SND_END[] = {{62, 60}, {0, 10}, {41, 15}, {0, 5}, {41, 15}, {0, 5}, {41, 15}};
+#define PLAY(s) buzz_play((s), sizeof(s) / sizeof(Note))
+
+static const Note *bz_seq;
+static uint8_t bz_len, bz_i;
+static uint32_t bz_note_end;
+
+static void buzz_off(void) {
+  TCCR2 = 0;
+  PORTD &= ~(1 << PD7);
+}
+
+static void buzz_note(void) {
+  if (bz_i >= bz_len) { buzz_off(); bz_seq = 0; return; }
+  Note n = bz_seq[bz_i];
+  if (n.ocr) {
+    OCR2 = n.ocr;                                        /* f = 62500 / (1 + ocr) Hz */
+    TCCR2 = (1 << WGM21) | (1 << COM20) | (1 << CS22);   /* CTC, toggle OC2, /64 */
+  } else {
+    buzz_off();
+  }
+  bz_note_end = millis() + (uint32_t)n.cs * 10;
+}
+
+static void buzz_play(const Note *s, uint8_t n) {
+  bz_seq = s; bz_len = n; bz_i = 0;
+  buzz_note();
+}
+
+static void buzz_update(uint32_t now) {
+  if (bz_seq && now >= bz_note_end) { bz_i++; buzz_note(); }
+}
+
+static void wait_ms(uint32_t ms) {      /* blocking wait that keeps sounds and pulses running */
+  uint32_t end = millis() + ms;
+  while (millis() < end) {
+    uint32_t now = millis();
+    buzz_update(now); servo_update(now);
+  }
+}
+
+/* ============================================================== UART / HC-05 */
+static volatile char rx_move = 'S';
+static volatile uint8_t rx_fire, rx_freeze;
+static volatile uint32_t rx_last_ms;
+static volatile uint8_t rx_seen;
+
+static void uart_init(void) {
+  const uint16_t ubrr = F_CPU / (16UL * UART_BAUD) - 1;
+  UBRRH = (uint8_t)(ubrr >> 8);
+  UBRRL = (uint8_t)ubrr;
+  UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
+  UCSRC = (1 << URSEL) | (1 << UCSZ1) | (1 << UCSZ0);  /* 8N1 */
+}
+
+ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds */
+  char c = UDR;
+  switch (c) {
+    case 'L': case 'R': case 'S': rx_move = c; break;
+    case 'F': rx_fire = 1; break;
+    case 'Z': rx_freeze = 1; break;
+    default: return;
+  }
+  rx_last_ms = g_ms;
+  rx_seen = 1;
+  if (UCSRA & (1 << UDRE)) UDR = c | 0x20;  /* lowercase echo, so the laptop can check the link */
+}
+
+static void uart_putc(char c) {
+  while (!(UCSRA & (1 << UDRE))) {}
+  UDR = c;
+}
+
+static void uart_puts(const char *s) { while (*s) uart_putc(*s++); }
+
+static void uart_putu(uint16_t v) {
+  char b[6]; uint8_t i = 0;
+  do { b[i++] = '0' + v % 10; v /= 10; } while (v);
+  while (i) uart_putc(b[--i]);
+}
+
+/* ============================================================== GOAL LASERS (INT0 / INT1) */
+#define GOAL_AT_HUMAN  1                 /* beam on the human's goal line broke -> AI scores */
+#define GOAL_AT_AI     2                 /* beam on the AI's goal line broke    -> human scores */
+static volatile uint8_t goal_flags;
+
+#if SWAP_GOAL_SENSORS
+ISR(INT0_vect) { goal_flags |= GOAL_AT_AI; }
+ISR(INT1_vect) { goal_flags |= GOAL_AT_HUMAN; }
+#else
+ISR(INT0_vect) { goal_flags |= GOAL_AT_HUMAN; }
+ISR(INT1_vect) { goal_flags |= GOAL_AT_AI; }
+#endif
+
+static void lasers_init(void) {
+  DDRD &= ~((1 << PD2) | (1 << PD3));
+  PORTD |= (1 << PD2) | (1 << PD3);                  /* pull-ups: an unplugged receiver reads "beam OK" */
+  MCUCR |= (1 << ISC01) | (1 << ISC11);              /* falling edge = beam just broke */
+  GIFR = (1 << INTF0) | (1 << INTF1);
+  GICR |= (1 << INT0) | (1 << INT1);
+}
+
+static uint8_t goal_flags_take(void) {
+  uint8_t g;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { g = goal_flags; goal_flags = 0; }
+  return g;
+}
+
+static void lasers_report(void) {       /* LOW = receiver sees no laser (misaligned or blocked) */
+  uart_puts((PIND & (1 << PD2)) ? "LASER A OK\n" : "LASER A BLOCKED\n");
+  uart_puts((PIND & (1 << PD3)) ? "LASER B OK\n" : "LASER B BLOCKED\n");
+}
+
+/* ============================================================== MIRROR AI */
+/* Record the human's left/right every 10 ms; the AI replays it `delay` later.
+   Straight shots come back along the same line, so copying the human blocks them. */
+#define MIRROR_SLOTS 64                  /* 64 x 10 ms = 640 ms of history */
+static int8_t mirror_buf[MIRROR_SLOTS];
+static uint8_t mirror_head;
+static uint32_t mirror_next_sample, mirror_fire_at;
+
+static void mirror_record(uint32_t now, int8_t human_dir) {
+  if (now < mirror_next_sample) return;
+  mirror_next_sample = now + 10;
+  mirror_buf[mirror_head] = human_dir;
+  mirror_head = (mirror_head + 1) % MIRROR_SLOTS;
+}
+
+static int8_t mirror_dir(uint8_t level) {
+  uint8_t back = MIRROR_DELAY_MS[level] / 10;
+  uint8_t i = (mirror_head + MIRROR_SLOTS - 1 - back) % MIRROR_SLOTS;
+  return MIRROR_SIGN * mirror_buf[i];
+}
+
+/* ============================================================== SELF-TEST */
+static void self_test(void) {
+  uart_puts("SELFTEST\n");
+  PLAY(SND_BEEP1); wait_ms(600);
+  uart_puts("AI motor LEFT\n");    motor_ai(-1);    wait_ms(400); motor_ai(0);    wait_ms(400);
+  uart_puts("AI motor RIGHT\n");   motor_ai(+1);    wait_ms(400); motor_ai(0);
+  PLAY(SND_BEEP2); wait_ms(800);
+  uart_puts("AI servo\n");         servo_fire(SERVO_AI, millis()); wait_ms(600);
+  PLAY(SND_BEEP3); wait_ms(900);
+  uart_puts("HUMAN motor LEFT\n"); motor_human(-1); wait_ms(400); motor_human(0); wait_ms(400);
+  uart_puts("HUMAN motor RIGHT\n");motor_human(+1); wait_ms(400); motor_human(0);
+  PLAY(SND_BEEP1); wait_ms(600);
+  uart_puts("HUMAN servo\n");      servo_fire(SERVO_HUMAN, millis()); wait_ms(600);
+  lasers_report();
+  uart_puts("SELFTEST done\n");
+  PLAY(SND_END); wait_ms(1500);
+}
+
+/* ============================================================== DIFFICULTY SELECT */
+static uint8_t select_level(void) {
+  static const Note *const beeps[3] = {SND_BEEP1, SND_BEEP2, SND_BEEP3};
+  static const uint8_t lens[3] = {1, 3, 5};
+  uint8_t level = 1;                    /* index: 0 easy, 1 medium, 2 hard */
+  buzz_play(beeps[level], lens[level]);
+  uint32_t deadline = millis() + 3000;
+  uint8_t was_down = 0;
+  while (millis() < deadline) {
+    uint32_t now = millis();
+    buzz_update(now);
+    uint8_t down = freeze_btn_down();
+    if (down && !was_down) {
+      level = (level + 1) % 3;
+      buzz_play(beeps[level], lens[level]);
+      deadline = now + 3000;            /* more time after every press */
+      _delay_ms(30);                    /* debounce */
+    }
+    was_down = down;
+  }
+  return level;
+}
+
+/* ============================================================== INIT */
+static void init_all(void) {
+  servo_init();                         /* first: both servos straight to REST */
+
+  uint8_t v = MCUCSR | (1 << JTD);      /* free PC2..PC5 from JTAG: two writes in 4 cycles */
+  MCUCSR = v;
+  MCUCSR = v;
+
+  DDRB &= ~((1 << PB0) | (1 << PB1));   /* freeze buttons (PB0 = unused old P1 button) */
+  PORTB |= (1 << PB0) | (1 << PB1);
+  DDRD |= (1 << PD7);                   /* buzzer */
+
+  TCCR0 = (1 << WGM01) | (1 << CS01) | (1 << CS00);   /* CTC, /64 */
+  OCR0 = 124;                                         /* 8 MHz / 64 / 125 = 1 kHz */
+  TIMSK |= (1 << OCIE0);
+
+  motors_init();
+  adc_init();
+  uart_init();
+  lasers_init();
+  sei();
+}
+
+/* ============================================================== MAIN */
+int main(void) {
+  init_all();
+  _delay_ms(50);
+  if (freeze_btn_down()) {
+    self_test();
+    while (freeze_btn_down()) {}        /* wait for release */
+  }
+
+  uint8_t level = select_level();
+
+  for (;;) {                            /* one loop = one match */
+    PLAY(SND_START);
+    wait_ms(700);
+    uart_puts("START LEVEL ");
+    uart_putu(level + 1);
+    uart_putc('\n');
+    lasers_report();
+
+    uint32_t start = millis();
+    uint32_t human_frozen_until = 0, ai_frozen_until = 0;
+    uint32_t human_freeze_ready = 0, ai_freeze_ready = 0;
+    uint32_t next_telemetry = 0;
+    uint16_t last_tick_sec = 0xFFFF;
+    uint8_t link_up = 0, btn_was_down = 1;
+    uint8_t score_human = 0, score_ai = 0;
+    uint32_t goal_ready_at = 0;
+    goal_flags_take();                  /* forget anything that broke a beam before kick-off */
+
+    for (;;) {
+      uint32_t now = millis();
+      uint16_t left = MATCH_SECONDS - (uint16_t)((now - start) / 1000);
+      if ((now - start) / 1000 >= MATCH_SECONDS) break;
+
+      buzz_update(now);
+      servo_update(now);
+
+      /* ---------------- HUMAN ---------------- */
+      int8_t human_dir = 0;
+      if (now >= human_frozen_until) {
+        uint16_t x = adc_read(1), y = adc_read(3);
+        human_dir = (x < JOY_LOW) ? -1 : (x > JOY_HIGH) ? 1 : 0;
+        if (y > JOY_HIGH && servo_ready(SERVO_HUMAN, now)) {
+          servo_fire(SERVO_HUMAN, now);
+          /* the ball leaves when the arm hits it, ~2/3 into the swing */
+          if (!mirror_fire_at) mirror_fire_at = now + HUMAN_CONTACT_MS + MIRROR_FIRE_DELAY_MS;
+        }
+        uint8_t down = freeze_btn_down();
+        if (down && !btn_was_down && now >= human_freeze_ready) {
+          ai_frozen_until = now + FREEZE_MS;
+          human_freeze_ready = now + FREEZE_COOLDOWN_MS;
+          PLAY(SND_SIREN);
+        }
+        btn_was_down = down;
+      }
+      motor_human(human_dir);
+      mirror_record(now, human_dir);
+
+      /* ---------------- AI ---------------- */
+      uint32_t last_rx;
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
+      uint8_t link_now = rx_seen && (now - last_rx < LINK_TIMEOUT_MS);
+      if (link_now != link_up) {
+        link_up = link_now;
+        PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
+        uart_puts(link_up ? "MODE CAMERA\n" : "MODE MIRROR\n");
+      }
+
+      int8_t ai_dir = 0;
+      if (now >= ai_frozen_until) {
+        if (link_up) {
+          ai_dir = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
+          if (rx_fire) { rx_fire = 0; servo_fire(SERVO_AI, now); }
+          if (rx_freeze) {
+            rx_freeze = 0;
+            if (now >= ai_freeze_ready) {
+              human_frozen_until = now + FREEZE_MS;
+              ai_freeze_ready = now + FREEZE_COOLDOWN_MS;
+              PLAY(SND_SIREN);
+            }
+          }
+          mirror_fire_at = 0;
+        } else {
+          ai_dir = mirror_dir(level);
+          if (mirror_fire_at && now >= mirror_fire_at) {
+            mirror_fire_at = 0;
+            servo_fire(SERVO_AI, now);
+          }
+        }
+      } else {
+        rx_fire = rx_freeze = 0;        /* frozen: ignore queued actions */
+      }
+      motor_ai(ai_dir);
+
+      /* ---------------- GOALS ---------------- */
+      uint8_t g = goal_flags_take();
+      if (g && now >= goal_ready_at) {
+        goal_ready_at = now + GOAL_LOCKOUT_MS;
+        uint8_t human_scored = (g & GOAL_AT_AI) != 0;   /* both at once can't really happen; favour the human */
+        if (human_scored) { score_human++; PLAY(SND_GOAL_HUMAN); }
+        else              { score_ai++;    PLAY(SND_GOAL_AI); }
+        uart_puts(human_scored ? "G H " : "G A ");
+        uart_putu(score_human);
+        uart_putc(' ');
+        uart_putu(score_ai);
+        uart_putc('\n');
+      }
+
+      /* ---------------- TIMER SOUNDS + TELEMETRY ---------------- */
+      if (left <= 10 && left != last_tick_sec) {
+        last_tick_sec = left;
+        PLAY(SND_TICK);
+      }
+      if (now >= next_telemetry) {
+        next_telemetry = now + TELEMETRY_MS;
+        uart_puts("T ");
+        uart_putu(left);
+        uart_puts(link_up ? " CAM\n" : " MIR\n");
+      }
+    }
+
+    /* ---------------- MATCH OVER ---------------- */
+    motor_ai(0);
+    motor_human(0);
+    uart_puts("END ");
+    uart_putu(score_human);
+    uart_putc(' ');
+    uart_putu(score_ai);
+    uart_putc('\n');
+    PLAY(SND_END);
+    while (freeze_btn_down()) buzz_update(millis());
+    while (!freeze_btn_down()) buzz_update(millis());   /* press FREEZE for a new match */
+    while (freeze_btn_down()) buzz_update(millis());
+  }
+}

@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 1000" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/>
+    </marker>
+  </defs>
+  <rect width="1120" height="1000" fill="#fff"/>
+
+  <text x="30" y="38" font-size="22" font-weight="bold" fill="#222">CHEERIVY solenoid driver: your circuit + flyback diode</text>
+  <text x="30" y="62" font-size="14" fill="#666">Black = your existing circuit (CKT_of_solanoid.jpeg)  ·  <tspan fill="#d62728" font-weight="bold">Red = ADD (flyback diode)</tspan>  ·  <tspan fill="#e67e00" font-weight="bold">Orange = optional</tspan></text>
+
+  <!-- ============== +12V rail ============== -->
+  <line x1="390" y1="110" x2="960" y2="110" stroke="#222" stroke-width="2.5"/>
+  <text x="400" y="100" font-size="15" font-weight="bold" fill="#222">+12 V</text>
+
+  <!-- ============== GND bus ============== -->
+  <line x1="290" y1="540" x2="700" y2="540" stroke="#222" stroke-width="2.5"/>
+  <g stroke="#222" stroke-width="2.5">
+    <line x1="495" y1="540" x2="495" y2="556"/>
+    <line x1="477" y1="556" x2="513" y2="556"/><line x1="484" y1="563" x2="506" y2="563"/><line x1="491" y1="570" x2="499" y2="570"/>
+  </g>
+  <text x="520" y="566" font-size="13" fill="#555">GND (common with ATmega GND)</text>
+
+  <!-- ============== ATmega pin 19 ============== -->
+  <rect x="30" y="325" width="120" height="70" rx="6" fill="#eef3fb" stroke="#4a6fa5" stroke-width="2"/>
+  <text x="90" y="352" font-size="14" font-weight="bold" fill="#234" text-anchor="middle">ATmega32</text>
+  <text x="90" y="372" font-size="13" fill="#234" text-anchor="middle">pin 19 (PD5)</text>
+  <line x1="150" y1="360" x2="205" y2="360" stroke="#222" stroke-width="2.5"/>
+  <circle cx="180" cy="360" r="4" fill="#e67e00"/>
+
+  <!-- R1 220 -->
+  <path d="M205,360 l8,-10 l12,20 l12,-20 l12,20 l12,-20 l12,20 l7,-10" fill="none" stroke="#222" stroke-width="2.5"/>
+  <text x="218" y="338" font-size="14" fill="#222">R1 220 Ω</text>
+  <line x1="280" y1="360" x2="345" y2="360" stroke="#222" stroke-width="2.5"/>
+  <circle cx="310" cy="360" r="4" fill="#222"/>
+
+  <!-- R2 10k base pull-down -->
+  <line x1="310" y1="360" x2="310" y2="400" stroke="#222" stroke-width="2.5"/>
+  <path d="M310,400 l-10,8 l20,12 l-20,12 l20,12 l-20,12 l20,12 l-10,7" fill="none" stroke="#222" stroke-width="2.5"/>
+  <line x1="310" y1="475" x2="310" y2="540" stroke="#222" stroke-width="2.5"/>
+  <text x="240" y="445" font-size="14" fill="#222">R2 10k</text>
+
+  <!-- NPN -->
+  <circle cx="370" cy="360" r="32" fill="none" stroke="#222" stroke-width="2"/>
+  <line x1="355" y1="338" x2="355" y2="382" stroke="#222" stroke-width="4"/>
+  <line x1="345" y1="360" x2="355" y2="360" stroke="#222" stroke-width="2.5"/>
+  <line x1="355" y1="350" x2="390" y2="325" stroke="#222" stroke-width="2.5"/>
+  <line x1="390" y1="325" x2="390" y2="290" stroke="#222" stroke-width="2.5"/>
+  <line x1="355" y1="370" x2="390" y2="395" stroke="#222" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="390" y1="395" x2="390" y2="540" stroke="#222" stroke-width="2.5"/>
+  <text x="330" y="420" font-size="13" fill="#555">Q1 NPN</text>
+
+  <!-- R3 1k collector pull-up to 12V -->
+  <line x1="390" y1="110" x2="390" y2="150" stroke="#222" stroke-width="2.5"/>
+  <path d="M390,150 l-10,8 l20,12 l-20,12 l20,12 l-20,12 l20,12 l-10,7" fill="none" stroke="#222" stroke-width="2.5"/>
+  <line x1="390" y1="225" x2="390" y2="290" stroke="#222" stroke-width="2.5"/>
+  <text x="408" y="195" font-size="14" fill="#222">R3 1k</text>
+  <circle cx="390" cy="280" r="4" fill="#222"/>
+
+  <!-- gate node -->
+  <line x1="390" y1="280" x2="600" y2="280" stroke="#222" stroke-width="2.5"/>
+  <circle cx="520" cy="280" r="4" fill="#222"/>
+  <text x="430" y="272" font-size="12" fill="#555">gate signal</text>
+
+  <!-- R4 gate pull-down -->
+  <line x1="520" y1="280" x2="520" y2="400" stroke="#222" stroke-width="2.5"/>
+  <path d="M520,400 l-10,8 l20,12 l-20,12 l20,12 l-20,12 l20,12 l-10,7" fill="none" stroke="#222" stroke-width="2.5"/>
+  <line x1="520" y1="475" x2="520" y2="540" stroke="#222" stroke-width="2.5"/>
+  <text x="535" y="445" font-size="14" fill="#222">R4 (your 10k/18k)</text>
+
+  <!-- MOSFET IRF3205 (N-channel) -->
+  <line x1="600" y1="245" x2="600" y2="315" stroke="#222" stroke-width="3"/>
+  <line x1="614" y1="238" x2="614" y2="258" stroke="#222" stroke-width="3"/>
+  <line x1="614" y1="270" x2="614" y2="290" stroke="#222" stroke-width="3"/>
+  <line x1="614" y1="302" x2="614" y2="322" stroke="#222" stroke-width="3"/>
+  <line x1="614" y1="248" x2="660" y2="248" stroke="#222" stroke-width="2.5"/>
+  <line x1="614" y1="312" x2="660" y2="312" stroke="#222" stroke-width="2.5"/>
+  <line x1="660" y1="280" x2="618" y2="280" stroke="#222" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="660" y1="280" x2="660" y2="312" stroke="#222" stroke-width="2.5"/>
+  <line x1="660" y1="312" x2="660" y2="540" stroke="#222" stroke-width="2.5"/>
+  <line x1="660" y1="248" x2="660" y2="220" stroke="#222" stroke-width="2.5"/>
+  <text x="672" y="300" font-size="15" font-weight="bold" fill="#222">Q2 IRF3205</text>
+  <text x="672" y="318" font-size="12" fill="#555">G = gate · D = drain (top) · S = source (bottom)</text>
+  <text x="604" y="240" font-size="12" fill="#555">D</text>
+  <text x="604" y="336" font-size="12" fill="#555">S</text>
+  <text x="582" y="275" font-size="12" fill="#555">G</text>
+
+  <!-- drain node to solenoid bottom -->
+  <line x1="660" y1="220" x2="960" y2="220" stroke="#222" stroke-width="2.5"/>
+  <circle cx="820" cy="220" r="4" fill="#222"/>
+  <circle cx="960" cy="220" r="4" fill="#d62728"/>
+
+  <!-- SOLENOID coil (between +12V and drain) -->
+  <line x1="820" y1="110" x2="820" y2="128" stroke="#222" stroke-width="2.5"/>
+  <path d="M820,128 a10,11 0 1 1 0,22 a10,11 0 1 1 0,22 a10,11 0 1 1 0,22 a10,11 0 1 1 0,22" fill="none" stroke="#222" stroke-width="2.5" transform="translate(0,-8)"/>
+  <line x1="820" y1="208" x2="820" y2="220" stroke="#222" stroke-width="2.5"/>
+  <text x="742" y="150" font-size="15" font-weight="bold" fill="#222" text-anchor="end">Solenoid</text>
+  <text x="742" y="168" font-size="12" fill="#555" text-anchor="end">OUT+ on top (12 V)</text>
+  <text x="742" y="184" font-size="12" fill="#555" text-anchor="end">OUT− at bottom (drain)</text>
+  <circle cx="820" cy="110" r="4" fill="#222"/>
+  <circle cx="960" cy="110" r="4" fill="#d62728"/>
+
+  <!-- FLYBACK DIODE D1 (NEW) -->
+  <line x1="960" y1="110" x2="960" y2="140" stroke="#d62728" stroke-width="3"/>
+  <line x1="940" y1="140" x2="980" y2="140" stroke="#d62728" stroke-width="4"/>
+  <polygon points="940,180 980,180 960,142" fill="#d62728"/>
+  <line x1="960" y1="180" x2="960" y2="220" stroke="#d62728" stroke-width="3"/>
+  <text x="992" y="135" font-size="15" font-weight="bold" fill="#d62728">D1 1N4007</text>
+  <text x="992" y="153" font-size="13" fill="#d62728">NEW</text>
+  <text x="992" y="175" font-size="12" fill="#d62728">bar/stripe (cathode)</text>
+  <text x="992" y="190" font-size="12" fill="#d62728">→ +12 V side</text>
+  <text x="992" y="210" font-size="12" fill="#d62728">anode → drain side</text>
+
+  <!-- spike current loop -->
+  <path d="M845,205 C890,240 930,240 945,190" fill="none" stroke="#d62728" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <path d="M945,125 C930,90 870,90 842,122" fill="none" stroke="#d62728" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="850" y="258" font-size="12" fill="#d62728">spike current circles here,</text>
+  <text x="850" y="273" font-size="12" fill="#d62728">not through the MOSFET</text>
+
+  <!-- OPTIONAL pull-up R5 -->
+  <line x1="180" y1="360" x2="180" y2="300" stroke="#e67e00" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <path d="M180,300 l-10,-8 l20,-12 l-20,-12 l20,-12 l-20,-12 l20,-12 l-10,-7" fill="none" stroke="#e67e00" stroke-width="2.5"/>
+  <line x1="180" y1="225" x2="180" y2="195" stroke="#e67e00" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="180" y="186" font-size="14" font-weight="bold" fill="#e67e00" text-anchor="middle">+5 V</text>
+  <text x="80" y="258" font-size="13" fill="#e67e00">R5 10k</text>
+  <text x="62" y="274" font-size="12" fill="#e67e00">(optional)</text>
+
+  <!-- ============== PANEL 1: how it works ============== -->
+  <rect x="30" y="610" width="520" height="360" rx="10" fill="#f6f7f9"/>
+  <text x="50" y="642" font-size="17" font-weight="bold" fill="#222">How it works</text>
+  <g font-size="13" fill="#222">
+    <rect x="50" y="656" width="480" height="28" fill="#e8ebf0"/>
+    <text x="58" y="675" font-weight="bold">pin 19</text>
+    <text x="125" y="675" font-weight="bold">Q1</text>
+    <text x="175" y="675" font-weight="bold">gate</text>
+    <text x="235" y="675" font-weight="bold">Q2</text>
+    <text x="290" y="675" font-weight="bold">solenoid</text>
+
+    <text x="58" y="708">5 V</text><text x="125" y="708">ON</text><text x="175" y="708">0 V</text><text x="235" y="708">OFF</text>
+    <text x="290" y="708">rest</text>
+
+    <text x="58" y="738">0 V</text><text x="125" y="738">OFF</text><text x="175" y="738">≈11 V</text><text x="235" y="738">ON</text>
+    <text x="290" y="738">coil ON → plunger pulls back</text>
+
+    <text x="58" y="768">5 V</text><text x="125" y="768">ON</text><text x="175" y="768">0 V</text><text x="235" y="768">OFF</text>
+    <text x="290" y="768" font-weight="bold">spring → SHOOTS</text>
+    <text x="290" y="786" fill="#d62728">+ voltage spike here (D1 absorbs it)</text>
+  </g>
+  <g font-size="13" fill="#444">
+    <text x="50" y="824" font-weight="bold" fill="#d62728">Why D1?</text>
+    <text x="50" y="844">When the coil switches off, it tries to keep the current flowing</text>
+    <text x="50" y="862">and makes a spike of 50–100+ V on the drain. That can slowly</text>
+    <text x="50" y="880">kill the IRF3205 and inject noise that resets the ATmega.</text>
+    <text x="50" y="900">D1 gives that current a safe loop back through the coil.</text>
+    <text x="50" y="930" font-weight="bold" fill="#e67e00">Why R5 (optional)?</text>
+    <text x="50" y="950">While flashing / at reset pin 19 floats → coil stays ON (pulled back, heating).</text>
+  </g>
+
+  <!-- ============== PANEL 2: real wiring ============== -->
+  <rect x="570" y="610" width="520" height="360" rx="10" fill="#fdf2f2"/>
+  <text x="590" y="642" font-size="17" font-weight="bold" fill="#d62728">Wiring D1 on the real solenoid</text>
+
+  <!-- solenoid body -->
+  <rect x="620" y="690" width="210" height="90" rx="8" fill="#d8d8d8" stroke="#888" stroke-width="2"/>
+  <rect x="830" y="722" width="60" height="26" rx="4" fill="#bbb" stroke="#888" stroke-width="2"/>
+  <text x="725" y="740" font-size="15" font-weight="bold" fill="#444" text-anchor="middle">SOLENOID</text>
+  <text x="862" y="770" font-size="11" fill="#666" text-anchor="middle">plunger</text>
+  <!-- terminals -->
+  <line x1="660" y1="780" x2="660" y2="850" stroke="#c0392b" stroke-width="3"/>
+  <line x1="790" y1="780" x2="790" y2="850" stroke="#222" stroke-width="3"/>
+  <text x="660" y="870" font-size="13" font-weight="bold" fill="#c0392b" text-anchor="middle">wire to +12 V</text>
+  <text x="790" y="870" font-size="13" font-weight="bold" fill="#222" text-anchor="middle">wire to MOSFET drain</text>
+  <!-- diode body across terminals -->
+  <line x1="660" y1="815" x2="690" y2="815" stroke="#888" stroke-width="2.5"/>
+  <line x1="760" y1="815" x2="790" y2="815" stroke="#888" stroke-width="2.5"/>
+  <rect x="690" y="803" width="70" height="24" rx="5" fill="#222"/>
+  <rect x="696" y="803" width="10" height="24" fill="#ccc"/>
+  <text x="725" y="845" font-size="12" fill="#222" text-anchor="middle">1N4007</text>
+  <path d="M700,798 L700,768" stroke="#d62728" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="590" y="905" font-size="13" fill="#222"><tspan font-weight="bold" fill="#d62728">Stripe</tspan> goes to the <tspan font-weight="bold">+12 V</tspan> terminal.</text>
+  <g font-size="12.5" fill="#444">
+    <text x="590" y="927">Solder it right at the solenoid terminals (short legs).</text>
+    <text x="590" y="946">Backwards = short circuit the moment the coil turns on!</text>
+    <text x="590" y="963" fill="#666">Shot got weaker? Use UF4007 (fast) or 1N4007 + 24 V zener in series.</text>
+  </g>
+</svg>

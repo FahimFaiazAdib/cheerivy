@@ -1,0 +1,27 @@
+# build outputs
+*.elf
+*.o
+main.hex
+final_game.hex
+lcd_test.*
+led_test.*
+
+# Python & virtual environments
+.venv*/
+venv*/
+__pycache__/
+*.pyc
+.cache/
+
+# Audio outputs & large reference voice media
+*.wav
+*.mp3
+
+# Local / personal / temporary
+.DS_Store
+*.pptx
+*.jpeg
+*.jpg
+archive/
+cheerivy_ai/calib.json
+cheerivy_ai/show/cache/
