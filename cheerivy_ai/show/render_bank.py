@@ -561,6 +561,54 @@ def get_all_spec_lines():
         {"id": "hl_end", "mode": "all", "tone": "calm", "name_before": None, "max": 2.5, "text": "Goodnight, from Cheerivy."},
     ])
 
+    # 10.15 Fillers (said when nothing else has been said for a while), intro and outro
+    def L(i, mode, tone, text, mx, name=None):
+        return {"id": i, "mode": mode, "tone": tone, "name_before": name, "max": mx, "text": text}
+    lines.extend([
+        L("fill_nil_01", "all", "build", "Still no goal. / But oh, the tension.", 4.0),
+        L("fill_nil_02", "all", "calm", "Nothing on the scoreboard. / Everything on the table.", 4.5),
+        L("fill_nil_03", "all", "calm", "Goalless. / But far from pointless.", 3.5),
+        L("fill_nil_04", "all", "calm", "Neither side has blinked yet.", 3.0),
+        L("fill_lvl_01", "all", "calm", "Level. / Nothing to separate them.", 3.5),
+        L("fill_lvl_02", "all", "build", "All square. / Every touch could decide it.", 4.0),
+        L("fill_lvl_03", "all", "calm", "As tight as the rails they run on.", 3.5),
+        L("fill_hlead_01", "ai", "build", "The human is in front. / Can it last?", 3.5),
+        L("fill_hlead_02", "ai", "calm", "The machine is behind. / And it knows it.", 3.5),
+        L("fill_hlead_03", "ai", "calm", "Humanity leads. / The circuits are thinking hard.", 4.5),
+        L("fill_alead_01", "ai", "calm", "The machine leads. / The human needs an answer.", 4.5),
+        L("fill_alead_02", "ai", "build", "Behind against the machine. / But not beaten. / Not yet.", 5.0),
+        L("fill_alead_03", "ai", "calm", "Cold numbers on the scoreboard. / Warm hope in the hands.", 5.0),
+        L("fill_lead_01", "all", "calm", "Is in front. / And the pressure is on the other side.", 4.5, "calm"),
+        L("fill_lead_02", "all", "calm", "Holds the lead. / For now.", 3.0, "calm"),
+        L("fill_big_01", "all", "calm", "This is becoming a long night for somebody.", 3.5),
+        L("fill_ai_01", "ai", "calm", "Watch the machine. / It reads every angle.", 3.5),
+        L("fill_ai_02", "ai", "calm", "The camera sees everything. / The carriage answers.", 4.0),
+        L("fill_ai_03", "ai", "calm", "Every movement calculated. / Every centimetre covered.", 4.5),
+        L("fill_ai_04", "ai", "calm", "Thirty frames a second, / and not one wasted.", 4.0),
+        L("fill_play_01", "all", "build", "Both sides working perfectly. / What a contest this is!", 4.5),
+        L("fill_play_02", "all", "build", "This is a proper game now!", 2.5),
+        L("fill_play_03", "all", "build", "End to end! / Neither side giving an inch!", 3.5),
+        L("fill_play_04", "all", "calm", "Quality. / From both ends of the table.", 3.5),
+        L("fill_play_05", "all", "calm", "You could watch this all night.", 3.0),
+        L("fill_pvp_01", "pvp", "calm", "Two friends. / Neither wants to lose this one.", 4.0),
+        L("fill_pvp_02", "pvp", "calm", "Joystick in hand. / Pride on the line.", 3.5),
+        L("fill_early_01", "all", "calm", "Early days. / Both sides feeling each other out.", 4.0),
+        L("fill_early_02", "all", "calm", "Plenty of time. / But none to waste.", 3.5),
+        L("fill_late_01", "all", "build", "Time is running out. / Somebody must be brave.", 4.0),
+        L("fill_late_02", "all", "build", "Every second matters now.", 2.5),
+        L("fill_gen_01", "all", "calm", "Plywood, / motors, / and pure drama.", 3.5),
+        L("fill_gen_02", "all", "calm", "This is what engineering looks like, when it plays.", 4.0),
+        L("fill_gen_03", "all", "calm", "The finest little arena in Palashi.", 3.5),
+        L("fill_gen_04", "all", "calm", "A laboratory, / turned into a theatre.", 3.5),
+        L("intro_01", "all", "calm", "Good evening, / and welcome to Palashi. // Tonight, a small wooden arena becomes the biggest stage in the building. // This is Cheerivy.", 12.0),
+        L("intro_02", "all", "calm", "Welcome, / to the Cheerivy arena. // Two carriages. / One ball. / And a story waiting to be written.", 10.0),
+        L("intro_ai_01", "ai", "calm", "A camera for eyes. / A chip for a brain. // Welcome to Cheerivy, / where you play against the machine.", 10.0),
+        L("intro_pvp_01", "pvp", "calm", "Welcome to Cheerivy. // Two players. / Two joysticks. / And only one of them leaves as champion.", 10.0),
+        L("outro_01", "all", "calm", "And that is all from the Cheerivy arena tonight. // Thank you for watching. / Goodnight.", 9.0),
+        L("outro_02", "all", "calm", "The lights go down on Palashi. // But what happened here, / will be remembered. // Goodnight, from Cheerivy.", 11.0),
+        L("outro_03", "all", "calm", "The motors rest. / The ball is still. // Until next time, / goodnight from Cheerivy.", 10.0),
+    ])
+
     return lines
 
 
@@ -642,7 +690,7 @@ def main():
 
     all_lines = get_all_spec_lines()
     if args.only:
-        all_lines = [x for x in all_lines if x["id"].startswith(args.only)]
+        all_lines = [x for x in all_lines if x["id"].startswith(tuple(args.only.split(",")))]
 
     total_items = len(all_lines)
     print(f"[*] Total bank clips to process: {total_items}")

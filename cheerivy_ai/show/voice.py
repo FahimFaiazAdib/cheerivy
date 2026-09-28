@@ -58,7 +58,8 @@ def _wav_seconds(path):
 
 CLIP_GAP_S = 0.14     # pause between clips of one sequence (name -> line -> score)
 LINE_GAP_S = 0.35     # breath between two separate lines
-WIN_MARGIN_S = 0.25   # Windows takes a moment to start a sound: wait this much longer than the clip
+WIN_MARGIN_S = 0.25
+ROBOT_START_S = 0.3   # Bluetooth + the DFPlayer finding the file on the card   # Windows takes a moment to start a sound: wait this much longer than the clip
 
 
 def _join(paths):
@@ -99,8 +100,13 @@ def _find_uv():
 
 
 class Voice:
-    def __init__(self, enabled=True, use_kokoro=True, speed=1.05):
+    def __init__(self, enabled=True, use_kokoro=True, speed=1.05, robot_send=None, tracks=None):
+        """robot_send + tracks: play recorded clips on the robot's DFPlayer instead of the laptop
+        (robot_send("P12;") plays /MP3/0012.mp3; tracks maps each clip path to its number)."""
         self.enabled = enabled
+        self.robot_send = robot_send
+        self.tracks = tracks or {}
+        self._robot_stop = threading.Event()
         self.speed = speed
         self.ready = False            # Kokoro worker loaded
         self.status = "off" if not enabled else "starting"
@@ -113,6 +119,8 @@ class Voice:
         self._win_stop = threading.Event()   # set by hush() to cut a Windows line short
         self._gen = 0                 # bumped by hush(): a recorded sequence stops between files
         self._stop = False
+        self.busy = False             # something is being played right now
+        self.quiet_since = time.time()   # when the last line finished
         os.makedirs(CACHE, exist_ok=True)
         if not enabled:
             return
@@ -240,6 +248,11 @@ class Voice:
         self._seq += 1
         self._play_q.put((priority, self._seq, time.time(), max_age, (gap,) + tuple(paths)))
 
+    @property
+    def idle(self):
+        """Nothing playing and nothing waiting."""
+        return not self.busy and self._play_q.empty()
+
     def hush(self):
         """Stop the current line and forget queued ones."""
         self._gen += 1
@@ -248,6 +261,9 @@ class Voice:
                 self._play_q.get_nowait()
         except queue.Empty:
             pass
+        if self.robot_send and self.busy:
+            self._robot_stop.set()
+            self.robot_send("P0;")                    # stop the DFPlayer
         if IS_WIN:
             self._win_stop.set()
             try:
@@ -269,6 +285,17 @@ class Voice:
         self._current = subprocess.Popen(["afplay", path])
         self._current.wait()
 
+    def _play_on_robot(self, paths, gen):
+        """Send the clips one by one to the DFPlayer, each after the previous one has finished."""
+        for i, path in enumerate(paths):
+            if gen != self._gen or self._stop:
+                return
+            self._robot_stop.clear()
+            self.robot_send(f"P{self.tracks[path]};")
+            wait = _wav_seconds(path) + ROBOT_START_S + (CLIP_GAP_S if i < len(paths) - 1 else 0)
+            if self._robot_stop.wait(wait):
+                return
+
     def _player(self):
         while not self._stop:
             try:
@@ -278,8 +305,15 @@ class Voice:
             if isinstance(text, tuple):                 # recorded clips from the voice bank
                 if time.time() - created > max_age:
                     continue
+                self.busy = True
                 gen = self._gen
                 gap, text = text[0], text[1:]
+                if self.robot_send and all(p in self.tracks for p in text):
+                    self._play_on_robot(text, gen)
+                    if gap and gen == self._gen:
+                        time.sleep(LINE_GAP_S)
+                    self.busy, self.quiet_since = False, time.time()
+                    continue
                 joined = _join(list(text)) if len(text) > 1 else text[0]
                 for path in ([joined] if joined else text):
                     if gen != self._gen or self._stop:    # hush() arrived: drop the rest
@@ -290,6 +324,7 @@ class Voice:
                         pass
                 if gap and gen == self._gen:
                     time.sleep(LINE_GAP_S)                # a breath before the next line
+                self.busy, self.quiet_since = False, time.time()
                 continue
             path = self.render(text, wait=max(1.0, max_age - (time.time() - created)))
             if not path or time.time() - created > max_age:

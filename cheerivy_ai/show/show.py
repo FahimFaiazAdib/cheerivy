@@ -47,6 +47,7 @@ CONNECT, MENU, NAMES, WAITING, LIVE, RESULTS = "CONNECT", "MENU", "NAMES", "WAIT
 READY_FRESH_S = 3.0        # a "READY" newer than this = the robot is in its lobby and listening
 GOAL_ANIM_S = 3.2
 MAX_REEL = 6               # goals shown in the highlight reel
+FILL_GAP_S = 7.0      # silence this long during play -> a filler line (7-12 s, random)
 CHAT_GAP_S = 4.0      # in-play lines: at most one every this many seconds
 CHAT_BIG_GAP_S = 1.5  #   ... but a milestone (5-touch rally, 3 saves) only needs this gap
 CHAT_SHOT_P = 0.35    # chance of a build-up line ("Here it comes!") on a new shot
@@ -90,7 +91,7 @@ class Burst:
 
 
 class Show:
-    def __init__(self, cal, voice=True, match_seconds=180, level=2, send=None, robot=True):
+    def __init__(self, cal, voice=True, match_seconds=180, level=2, send=None, robot=True, robot_voice=False):
         """send: function that writes one command byte to the robot (Link.send).
         robot=False: no robot to talk to, so skip the CONNECT screen."""
         self.cal = cal
@@ -108,7 +109,13 @@ class Show:
         self.lock = threading.Lock()
 
         self.bank = VoiceBank()
-        self.voice = Voice(enabled=voice, use_kokoro=not self.bank.ok)
+        on_robot = robot_voice and self.bank.ok and self.bank.tracks
+        if robot_voice and not on_robot:
+            print("[voice] --robot-voice: no sd_tracks.json in show/voice_bank (run export_sd.py) -> laptop speaker")
+        self.voice = Voice(enabled=voice, use_kokoro=not self.bank.ok,
+                           robot_send=self.send if on_robot else None, tracks=self.bank.tracks)
+        if on_robot:
+            print(f"[voice] commentary plays on the robot's speaker ({len(self.bank.tracks)} tracks on the SD card)")
         if self.bank.ok and voice:
             self.voice.status = f"voice bank ({len(self.bank.clips)} clips)"
             print(f"[voice] using the recorded voice bank: {len(self.bank.clips)} clips")
@@ -157,6 +164,10 @@ class Show:
 
     def _set_phase(self, p):
         self.phase, self.phase_t = p, time.time()
+        # Intro before a match: when the menu or the kick-off wait comes up (at most once a minute).
+        if p in (MENU, WAITING) and self.bank.ok and time.time() - getattr(self, "_intro_at", 0) > 60:
+            self._intro_at = time.time()
+            self.voice.play(self.bank.intro(getattr(self, "game", 1) or 1), priority=3, max_age=5)
 
     def player(self):
         return self.names["H"].strip() or ("PLAYER 1" if self.game == 2 else "PLAYER")
@@ -329,7 +340,7 @@ class Show:
         self._set_phase(LIVE)
         if announce and self.bank.ok:
             self.voice.play(self.bank.kickoff(self.game, self.player(), self.ai_name(), self._fb("H"), self._fb("A")),
-                            priority=2, max_age=8)
+                            priority=2, max_age=8, interrupt=True)
         elif announce:
             self.voice.say(L.pick(L.KICKOFF_2P if self.game == 2 else L.KICKOFF, p=self.player(), ai=self.ai_name()),
                            priority=2, max_age=6)
@@ -601,6 +612,17 @@ class Show:
                          or (c["rest"] and now - c["rest"] > RALLY_BREAK_S)):
             st.rally = 0
             st._dir = 0
+        # Nothing said for a while: a filler that fits the score and the clock.
+        if (line is None and not goal_just_now and self.voice.idle
+                and now - max(c["t"], self.voice.quiet_since) > c.setdefault("fill_gap", FILL_GAP_S)):
+            h, a = self.score["H"], self.score["A"]
+            lead = None if h == a else ("H" if h > a else "A")
+            line = self.bank.filler(self.game, h, a, self._clock(now), now - (self.match_start or now),
+                                    st.rally, self.name_of(lead) if lead else None,
+                                    self._fb(lead) if lead else "the-challenger")
+            c["fill_gap"] = random.uniform(FILL_GAP_S, FILL_GAP_S + 5)
+            big = True
+
         c["shots"], c["saves"], c["rally"] = shots, st.ai_saves, st.rally
         if line and not goal_just_now and now - c["t"] > (CHAT_BIG_GAP_S if big else CHAT_GAP_S):
             c["t"] = now

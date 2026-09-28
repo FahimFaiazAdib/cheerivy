@@ -244,8 +244,11 @@ static void buzz_play(const Note *s, uint8_t n) {
   buzz_note();
 }
 
-static void buzz_update(uint32_t now) {
+static void df_update(uint32_t now);
+
+static void buzz_update(uint32_t now) { /* every main loop calls this: also passes voice clips on */
   if (bz_seq && now >= bz_note_end) { bz_i++; buzz_note(); }
+  df_update(now);
 }
 
 static void wait_ms(uint32_t ms) {      /* blocking wait that keeps sounds and pulses running */
@@ -254,6 +257,68 @@ static void wait_ms(uint32_t ms) {      /* blocking wait that keeps sounds and p
     uint32_t now = millis();
     buzz_update(now); servo_update(now);
   }
+}
+
+/* ============================================================== DFPLAYER MINI (voice) */
+/* Commentary clips on the microSD card, played by a DFPlayer Mini through the PAM8610 amp.
+   The laptop picks the clip and sends "P<n>;" (play /MP3/<n>.mp3, n = 1..2999; "P0;" = stop)
+   or "V<n>;" (volume 0..30) over Bluetooth; this forwards it to the DFPlayer.
+   DFPlayer RX <- PA5 / pin 35 through a 1k resistor. Software serial, 9600 8N1, send only. */
+#define DF_PORT PORTA
+#define DF_DDR  DDRA
+#define DF_BIT  PA5
+#define DF_VOLUME_DEFAULT 26
+#define DF_BOOT_MS 1500                 /* the DFPlayer ignores commands while it reads the card */
+
+static volatile uint8_t df_cmd;         /* 'P' or 'V' while its number is arriving, else 0 */
+static volatile uint16_t df_num;
+static volatile uint16_t df_play_req;   /* track + 1 (0 = nothing waiting) */
+static volatile uint8_t df_vol_req;     /* volume + 1 */
+static uint8_t df_booted;
+
+static void df_byte(uint8_t b) {        /* ~1 ms with interrupts off: the UART hardware holds 2 bytes meanwhile */
+  uint8_t sreg = SREG;
+  cli();
+  DF_PORT &= ~(1 << DF_BIT);            /* start bit */
+  _delay_us(104);
+  for (uint8_t i = 0; i < 8; i++) {
+    if (b & 1) DF_PORT |= (1 << DF_BIT); else DF_PORT &= ~(1 << DF_BIT);
+    b >>= 1;
+    _delay_us(104);
+  }
+  DF_PORT |= (1 << DF_BIT);             /* stop bit */
+  SREG = sreg;
+  _delay_us(104);
+}
+
+static void df_send(uint8_t cmd, uint16_t arg) {
+  uint8_t f[6] = {0xFF, 0x06, cmd, 0x00, (uint8_t)(arg >> 8), (uint8_t)arg};
+  uint16_t sum = 0;
+  for (uint8_t i = 0; i < 6; i++) sum += f[i];
+  sum = -sum;
+  df_byte(0x7E);
+  for (uint8_t i = 0; i < 6; i++) df_byte(f[i]);
+  df_byte(sum >> 8);
+  df_byte(sum & 0xFF);
+  df_byte(0xEF);
+}
+
+static void df_init(void) {
+  DF_DDR |= (1 << DF_BIT);
+  DF_PORT |= (1 << DF_BIT);             /* idle high */
+}
+
+static void df_update(uint32_t now) {   /* called from the main loops (via buzz_update) */
+  if (!df_booted) {
+    if (now < DF_BOOT_MS) return;
+    df_booted = 1;
+    df_send(0x06, DF_VOLUME_DEFAULT);
+  }
+  uint8_t v; uint16_t p;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { v = df_vol_req; df_vol_req = 0; p = df_play_req; df_play_req = 0; }
+  if (v) df_send(0x06, v - 1 > 30 ? 30 : v - 1);
+  if (p == 1) df_send(0x16, 0);                     /* "P0;" = stop */
+  else if (p) df_send(0x12, p - 1);                 /* play /MP3/<n>.mp3 */
 }
 
 /* ============================================================== UART / HC-05 */
@@ -275,7 +340,16 @@ static void uart_init(void) {
 ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds */
   char c = UDR;
   uint8_t echo = 1;                     /* only L R S F Z are echoed; menu bytes would garble status lines */
+  if (df_cmd) {                         /* inside "P123;" / "V25;": collect the number */
+    if (c >= '0' && c <= '9') { df_num = df_num * 10 + (c - '0'); return; }
+    if (c == ';') {
+      if (df_cmd == 'P') df_play_req = df_num + 1; else df_vol_req = df_num + 1;
+    }
+    df_cmd = 0;
+    if (c == ';') return;               /* anything else: a lost ';' — treat c as a normal byte */
+  }
   switch (c) {
+    case 'P': case 'V': df_cmd = c; df_num = 0; return;
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
     case 'Z': rx_freeze = 1; break;
@@ -414,6 +488,7 @@ static void init_all(void) {
 
   motors_init();
   adc_init();
+  df_init();
   uart_init();
   lasers_init();
   sei();

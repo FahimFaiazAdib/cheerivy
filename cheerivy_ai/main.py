@@ -88,6 +88,7 @@ def main():
     ap.add_argument("--no-send", action="store_true", help="never send commands to the robot")
     ap.add_argument("--no-show", action="store_true", help="no live show window")
     ap.add_argument("--no-voice", action="store_true", help="live show without voice commentary")
+    ap.add_argument("--robot-voice", action="store_true", help="play the commentary on the robot's speaker (DFPlayer)")
     ap.add_argument("--match-seconds", type=int, help="match length for the show's clock (default 180, sim 60)")
     args = ap.parse_args()
 
@@ -124,7 +125,7 @@ def main():
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
     if not args.no_show:
         show = Show(cal, voice=not args.no_voice, match_seconds=match_seconds,
-                    send=link.send, robot=not args.no_send)
+                    send=link.send, robot=not args.no_send, robot_voice=args.robot_voice)
         cv2.namedWindow(show_win, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(show_win, 1280, 720)
         show_phase = show.phase

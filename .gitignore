@@ -29,4 +29,5 @@ cheerivy_ai/show/cache/
 # voice clone inputs/outputs and render pipeline (not published)
 cheerivy_ai/show/voice_refs/
 cheerivy_ai/show/voice_bank/
+cheerivy_ai/show/sd_card/
 

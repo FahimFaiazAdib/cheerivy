@@ -46,6 +46,13 @@ class VoiceBank:
         except (OSError, ValueError, KeyError):
             pass
         self.ok = len(self.clips) > 20
+        # Track numbers on the robot's microSD card (made by export_sd.py): full path -> number
+        self.tracks = {}
+        try:
+            with open(os.path.join(folder, "sd_tracks.json")) as f:
+                self.tracks = {self._path(rel): n for rel, n in json.load(f).items()}
+        except (OSError, ValueError):
+            pass
 
     # ------------------------------------------------------------ low level
     def _path(self, rel):
@@ -191,6 +198,42 @@ class VoiceBank:
     def replay(self, game):
         return self.line(["hl_w_0", "hl_w_ai_"] if game == 1 else ["hl_w_0"], game)
 
+    def intro(self, game):
+        return self.line(["intro_0", "intro_ai_", "intro_pvp_"], game)
+
+    def outro(self, game):
+        return self.line(["outro_"], game)
+
+    def filler(self, game, h, a, left, elapsed, rally, leader=None, fb_leader="the-challenger"):
+        """Something to say when nothing has happened for a while, fitting the score and the clock."""
+        cats = ["fill_gen_", "fill_play_"]
+        if h == a == 0:
+            cats += ["fill_nil_"] * 3
+        elif h == a:
+            cats += ["fill_lvl_"] * 3
+        elif game == 1:
+            cats += ["fill_hlead_" if h > a else "fill_alead_"] * 3
+        else:
+            cats += ["fill_lead_"] * 3
+        if abs(h - a) >= 3:
+            cats += ["fill_big_"]
+        if game == 1:
+            cats += ["fill_ai_"] * 2
+        else:
+            cats += ["fill_pvp_"] * 2
+        if rally >= 3:
+            cats += ["fill_play_"] * 2
+        if elapsed < 40:
+            cats += ["fill_early_"] * 2
+        if left < 60:
+            cats += ["fill_late_"] * 2
+        random.shuffle(cats)
+        for cat in cats:                           # first category that has a clip for this game
+            seq = self.line([cat], game, leader, fb_leader)
+            if seq:
+                return seq
+        return []
+
     def closing(self, game, h, a):
         if h == a:
             cid = "hl_close_d"
@@ -198,7 +241,7 @@ class VoiceBank:
             cid = "hl_close_pvp"
         else:
             cid = "hl_close_h_ai" if h > a else "hl_close_a_ai"
-        return self.exact(cid) + self.exact("hl_end")
+        return self.exact(cid) + (self.outro(game) or self.exact("hl_end"))
 
     def award(self, kind, name, fallback):
         cid = {"rocket": "aw_rocket", "wall": "aw_wall"}.get(kind)
