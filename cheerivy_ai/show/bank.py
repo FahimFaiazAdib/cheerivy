@@ -35,6 +35,7 @@ class VoiceBank:
         self.clips = {}
         self.names = {}
         self._last = {}
+        self._plays = {}                 # clip id -> times picked
         try:
             with open(os.path.join(folder, "manifest.json")) as f:
                 for c in json.load(f)["clips"]:
@@ -67,10 +68,14 @@ class VoiceBank:
                 if cid.startswith(tuple(prefixes)) and c["mode"] in mode_ok]
         if not pool:
             return None
+        # Shuffle-bag: pick among the clips played the fewest times so far, so every version gets
+        # its turn before any repeats (and never the same one twice in a row).
         key = tuple(prefixes)
         fresh = [c for c in pool if c["id"] != self._last.get(key)] or pool
-        c = random.choice(fresh)
+        least = min(self._plays.get(c["id"], 0) for c in fresh)
+        c = random.choice([c for c in fresh if self._plays.get(c["id"], 0) == least])
         self._last[key] = c["id"]
+        self._plays[c["id"]] = self._plays.get(c["id"], 0) + 1
         return c
 
     def seq(self, clip, name=None, name_fallback="the-challenger"):

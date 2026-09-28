@@ -52,6 +52,7 @@ CHAT_BIG_GAP_S = 1.5  #   ... but a milestone (5-touch rally, 3 saves) only need
 CHAT_SHOT_P = 0.35    # chance of a build-up line ("Here it comes!") on a new shot
 CHAT_LOST_S = 2.5     # ball out of sight this long -> "Where is it?"
 CHAT_REST_S = 6.0     # ball resting this long -> a quiet line ("A moment to breathe.")
+RALLY_BREAK_S = 2.0   # ball gone or still this long = the rally is over
 CHAT_REPLY_S = 10.0   # a goal this soon after conceding one -> "The reply! Instant!"
 END_GRACE_S = 4.0          # clock hit 0 but no END line -> end the match ourselves
 
@@ -576,7 +577,7 @@ class Show:
             line, big = self.bank.exact("cb_sv3" if st.ai_saves == 3 else "cb_sv5"), True
         elif st.rally > c["rally"] and st.rally in (5, 8, 12):
             line, big = self.bank.exact(f"rally_{st.rally:02d}"), True
-        elif st.rally > c["rally"] and st.rally > 12 and st.rally % 4 == 0:
+        elif st.rally > c["rally"] and st.rally == 16:
             line, big = self.bank.exact("rally_gen"), True
         elif bounced and random.random() < 0.6:
             line = self.bank.line(["wall_"], self.game)
@@ -594,6 +595,12 @@ class Show:
             c["rest_said"] = True
             line = self.bank.line(["col_"], self.game)
 
+        # Without goal sensors a rally never "ends" by itself: a ball out of sight or lying still
+        # for a moment ends it, so the next exchange starts counting from zero again.
+        if st.rally and ((ball is None and now - c["seen"] > RALLY_BREAK_S)
+                         or (c["rest"] and now - c["rest"] > RALLY_BREAK_S)):
+            st.rally = 0
+            st._dir = 0
         c["shots"], c["saves"], c["rally"] = shots, st.ai_saves, st.rally
         if line and not goal_just_now and now - c["t"] > (CHAT_BIG_GAP_S if big else CHAT_GAP_S):
             c["t"] = now
