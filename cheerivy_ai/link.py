@@ -48,15 +48,17 @@ class Link:
         self.enabled = enabled
         self.port_hint = port
         self.running = True
-        if enabled:
-            self._try_open(verbose=True)
-            threading.Thread(target=self._reconnect_loop, daemon=True).start()
         self.swap = C.SWAP_LR   # motor wired the other way round -> swap L and R
         self.current = None
         self.last_send = 0.0
         self.sent_count = 0
         self.echo_count = 0     # lowercase echoes from the MCU = proof the link works both ways
         self._rx = ""
+        self._wlock = threading.Lock()   # the main loop and the heartbeat thread both write
+        if enabled:
+            self._try_open(verbose=True)
+            threading.Thread(target=self._reconnect_loop, daemon=True).start()
+            threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
     def _try_open(self, verbose=False):
         port = self.port_hint or find_port()
@@ -82,6 +84,17 @@ class Link:
             if self.ser is None and self.running:
                 self._try_open()
 
+    def _heartbeat_loop(self):
+        """Re-send the current move command on a steady clock, independent of the camera loop.
+        The firmware drops to Mirror AI after 400 ms of silence, and a slow camera frame or a
+        Windows hiccup in the main loop must not cause that."""
+        while self.running:
+            time.sleep(C.HEARTBEAT_S / 2)
+            cmd = self.current
+            if cmd is not None and self.ser and time.time() - self.last_send > C.HEARTBEAT_S:
+                self._write(self._wire(cmd))
+                self.last_send = time.time()
+
     def _drop(self, why):
         if self.ser:
             print(f"[link] lost connection ({why}) — reconnecting...")
@@ -98,20 +111,26 @@ class Link:
         return "RECONNECTING" if self.enabled else "SIM"
 
     def _write(self, cmd):
-        ser = self.ser
-        if ser:
-            try:
-                ser.write(cmd.encode())
-            except (serial.SerialException, OSError) as e:
-                self._drop(e)
-        if self.sink:
-            self.sink.on_command(cmd)
-        self.sent_count += 1
+        with self._wlock:
+            ser = self.ser
+            if ser:
+                try:
+                    ser.write(cmd.encode())
+                except serial.SerialTimeoutException:
+                    pass                      # Bluetooth busy for a moment: skip this byte, the heartbeat resends
+                except (serial.SerialException, OSError) as e:
+                    self._drop(e)
+            if self.sink:
+                self.sink.on_command(cmd)
+            self.sent_count += 1
+
+    def _wire(self, cmd):
+        return {"L": "R", "R": "L"}.get(cmd, cmd) if self.swap else cmd
 
     def move(self, cmd):
         now = time.time()
         if cmd != self.current or now - self.last_send > C.HEARTBEAT_S:
-            self._write({"L": "R", "R": "L"}.get(cmd, cmd) if self.swap else cmd)
+            self._write(self._wire(cmd))
             self.current, self.last_send = cmd, now
 
     def send(self, cmd):
