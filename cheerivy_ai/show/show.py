@@ -109,6 +109,7 @@ class Show:
         self.tele = {}
         self.trail = deque(maxlen=18)
         self.link_mode = "—"
+        self._mode_said_at = 0.0         # last time the AI's camera loss/return was commented on
         self.lasers = {}
 
         # layout (computed on the first frame)
@@ -220,6 +221,9 @@ class Show:
             return None
         if tag == "MODE" and len(parts) >= 2:
             self.link_mode = parts[1]
+            if self.phase == LIVE and self.game == 1 and time.time() - self._mode_said_at > 30:
+                self._mode_said_at = time.time()
+                self.voice.say(L.pick(L.AI_BLIND if parts[1] == "MIRROR" else L.AI_SEES), priority=4, max_age=3)
         elif tag == "G" and len(parts) >= 2 and parts[1] in ("H", "A"):
             self.goal(parts[1])
         elif tag == "END":
@@ -324,8 +328,35 @@ class Show:
         self.bursts.append(Burst(W / 2, H * 0.42, G.HUMAN if who == "H" else G.AI))
         _sound("Hero" if who == "H" else "Sosumi")
         self.voice.say(self._goal_line(who), priority=1, max_age=5, interrupt=True)
+        tail = self._goal_tail(who, g["clock"])
+        if tail:
+            self.voice.say(tail, priority=2, max_age=8)
         if speed >= L.FAST_SPEED:
-            self.voice.say(L.fill(L.FAST, v=speed), priority=2, max_age=7)
+            self.voice.say(L.fill(L.FAST, v=speed), priority=3, max_age=9)
+
+    def _goal_tail(self, who, clock_left):
+        """The second line after a goal: last gasp, equaliser, lead, comeback..."""
+        h, a = self.score["H"], self.score["A"]
+        name = self.name_of(who)
+        if clock_left < 5 and self.match_seconds > 20:
+            return L.pick(L.LAST_GASP, p=name)
+        if self.game == 2:
+            if h == a:
+                return L.pick(L.TAIL_EQUALISER_2P)
+            if (h > a) == (who == "H") and abs(h - a) == 1:
+                return L.pick(L.TAIL_LEAD_2P, p=name)
+            return None
+        if who == "H":
+            if h == a:
+                return L.pick(L.TAIL_EQUALISER)
+            if h == a + 1 and any(g["score"][1] > g["score"][0] for g in self.goals):
+                return L.pick(L.TAIL_COMEBACK, p=name)        # was behind earlier, now in front
+            if h == a + 1:
+                return L.pick(L.TAIL_LEAD_H, p=name)
+            return L.pick(L.TAIL_GOAL_H, p=name)
+        if a >= h + 2:
+            return L.pick(L.TAIL_AI_EXTENDS)
+        return None
 
     def _goal_line(self, who):
         if self.game == 2:
@@ -347,6 +378,8 @@ class Show:
         pl, ai = self.player(), self.ai_name()
         if self.game == 2 and h != a:
             text = L.fill(L.FULL_TIME_WIN_2P, p=pl if h > a else ai, h=max(h, a), a=min(h, a))
+        elif self.game == 2:
+            text = L.fill(L.FULL_TIME_DRAW_2P, h=h)
         else:
             line = L.FULL_TIME_WIN_H if h > a else L.FULL_TIME_WIN_A if a > h else L.FULL_TIME_DRAW
             text = L.fill(line, p=pl, ai=ai, h=h, a=a)
@@ -436,12 +469,16 @@ class Show:
         if self.phase != LIVE:
             return
         left = self._clock(now)
+        if left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
+            self.said.add("60")
+            self.voice.say(L.pick(L.SECONDS_60), priority=4, max_age=3)
         if left <= 30.5 and "30" not in self.said and self.match_seconds > 40:
             self.said.add("30")
-            self.voice.say(L.SECONDS_30, priority=3, max_age=3)
+            self.voice.say(L.pick(L.SECONDS_30), priority=3, max_age=3)
         if left <= 10.5 and "10" not in self.said:
             self.said.add("10")
-            self.voice.say(L.fill(L.SECONDS_10, p=self.player()), priority=3, max_age=3)
+            self.voice.say(L.pick(L.SECONDS_10_2P if self.game == 2 else L.SECONDS_10, p=self.player()),
+                           priority=3, max_age=3)
         if left <= 0 and self.clock_sync and now - self.clock_sync[1] > self.clock_sync[0] + END_GRACE_S:
             self.end_match()
 
@@ -848,12 +885,12 @@ class Show:
             self._scene_fulltime(canvas, t)
         elif name == "title":
             if first:
-                self.voice.say(L.HIGHLIGHTS, priority=2, max_age=4)
+                self.voice.say(L.pick(L.HIGHLIGHTS), priority=2, max_age=4)
             n = len(self.goals)
             self._scene_title(canvas, t, "MATCH HIGHLIGHTS", f"{n} GOAL{'S' if n != 1 else ''}")
         elif name == "nogoals":
             if first:
-                self.voice.say(L.NO_GOALS, priority=2, max_age=4)
+                self.voice.say(L.pick(L.NO_GOALS), priority=2, max_age=4)
             self._scene_title(canvas, t, "NO GOALS", "a defensive masterclass")
         elif name == "noclips":
             self._scene_title(canvas, t, "HIGHLIGHTS", "no clips were recorded")
