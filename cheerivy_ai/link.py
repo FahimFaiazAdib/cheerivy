@@ -70,7 +70,10 @@ class Link:
             return
         try:
             # Opening a Bluetooth port can block for seconds while it connects.
-            ser = serial.Serial(port, C.BAUD, timeout=0, write_timeout=0)
+            # write_timeout > 0: each write waits until it has really been sent. With 0 (non-blocking),
+            # Windows starts a new Bluetooth write while the last one is still pending and bytes get
+            # dropped, so the robot hears gaps and keeps flipping to Mirror AI.
+            ser = serial.Serial(port, C.BAUD, timeout=0, write_timeout=0.3)
             self.ser = ser
             self.current = None     # resend the current command straight away
             print(f"[link] connected to {port} @ {C.BAUD}")
