@@ -76,6 +76,7 @@ class Voice:
         self._seq = 0
         self._current = None          # running afplay process (Mac)
         self._win_stop = threading.Event()   # set by hush() to cut a Windows line short
+        self._gen = 0                 # bumped by hush(): a recorded sequence stops between files
         self._stop = False
         os.makedirs(CACHE, exist_ok=True)
         if not enabled:
@@ -194,8 +195,18 @@ class Voice:
         self._seq += 1
         self._play_q.put((priority, self._seq, time.time(), max_age, text))
 
+    def play(self, paths, priority=5, max_age=4.0, interrupt=False):
+        """Queue recorded clips (e.g. a name, then a line), played back to back as one item."""
+        if not self.enabled or not paths:
+            return
+        if interrupt:
+            self.hush()
+        self._seq += 1
+        self._play_q.put((priority, self._seq, time.time(), max_age, tuple(paths)))
+
     def hush(self):
         """Stop the current line and forget queued ones."""
+        self._gen += 1
         try:
             while True:
                 self._play_q.get_nowait()
@@ -227,6 +238,18 @@ class Voice:
             try:
                 _, _, created, max_age, text = self._play_q.get(timeout=0.5)
             except queue.Empty:
+                continue
+            if isinstance(text, tuple):                 # recorded clips from the voice bank
+                if time.time() - created > max_age:
+                    continue
+                gen = self._gen
+                for path in text:
+                    if gen != self._gen or self._stop:    # hush() arrived: drop the rest
+                        break
+                    try:
+                        self._play(path)
+                    except (OSError, RuntimeError):
+                        pass
                 continue
             path = self.render(text, wait=max(1.0, max_age - (time.time() - created)))
             if not path or time.time() - created > max_age:

@@ -30,6 +30,7 @@ from . import gfx as G
 from . import lines as L
 from .recorder import Recorder
 from .stats import Leaderboard, MatchStats
+from .bank import VoiceBank
 from .voice import Voice
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -98,7 +99,11 @@ class Show:
         self.phase_t = time.time()
         self.lock = threading.Lock()
 
-        self.voice = Voice(enabled=voice)
+        self.bank = VoiceBank()
+        self.voice = Voice(enabled=voice, use_kokoro=not self.bank.ok)
+        if self.bank.ok and voice:
+            self.voice.status = f"voice bank ({len(self.bank.clips)} clips)"
+            print(f"[voice] using the recorded voice bank: {len(self.bank.clips)} clips")
         self.board = Leaderboard(os.path.join(HERE, "leaderboard.json"))
         self.recorder = Recorder(MATCHES)
         self._reset_match()
@@ -156,6 +161,12 @@ class Show:
             return "PLAYER 1" if who == "H" else "PLAYER 2"
         return "PLAYER" if who == "H" else "AI"
 
+    def _fb(self, who):
+        """Recorded stand-in for a name that isn't in the voice bank."""
+        if self.game == 2:
+            return "player-one" if who == "H" else "player-two"
+        return "the-challenger" if who == "H" else "cheerivy-ai"
+
     def robot_listening(self):
         return self.robot and time.time() - self.ready_at < READY_FRESH_S
 
@@ -168,7 +179,8 @@ class Show:
     def _names_done(self):
         self.names["H"] = self.player()
         self.names["A"] = self.ai_name()
-        self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
+        if not self.bank.ok:
+            self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
         self._set_phase(WAITING)
         self.request_kickoff()
 
@@ -223,7 +235,10 @@ class Show:
             self.link_mode = parts[1]
             if self.phase == LIVE and self.game == 1 and time.time() - self._mode_said_at > 30:
                 self._mode_said_at = time.time()
-                self.voice.say(L.pick(L.AI_BLIND if parts[1] == "MIRROR" else L.AI_SEES), priority=4, max_age=3)
+                if self.bank.ok:
+                    self.voice.play(self.bank.blind() if parts[1] == "MIRROR" else self.bank.sight(), priority=4, max_age=3)
+                else:
+                    self.voice.say(L.pick(L.AI_BLIND if parts[1] == "MIRROR" else L.AI_SEES), priority=4, max_age=3)
         elif tag == "G" and len(parts) >= 2 and parts[1] in ("H", "A"):
             self.goal(parts[1])
         elif tag == "END":
@@ -290,7 +305,8 @@ class Show:
     def kickoff(self, announce=True):
         if self.phase in (CONNECT, MENU, NAMES):   # match already running on the robot: just join it
             self.names["H"], self.names["A"] = self.player(), self.ai_name()
-            self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
+            if not self.bank.ok:
+                self.voice.prepare(L.all_goal_lines(self.player(), self.ai_name(), self.game))
         with self.lock:
             self._reset_match()
             self.match_start = time.time()
@@ -299,7 +315,10 @@ class Show:
             self.recorder.new_match(folder)
             self.match_folder = folder
         self._set_phase(LIVE)
-        if announce:
+        if announce and self.bank.ok:
+            self.voice.play(self.bank.kickoff(self.game, self.player(), self.ai_name(), self._fb("H"), self._fb("A")),
+                            priority=2, max_age=8)
+        elif announce:
             self.voice.say(L.pick(L.KICKOFF_2P if self.game == 2 else L.KICKOFF, p=self.player(), ai=self.ai_name()),
                            priority=2, max_age=6)
 
@@ -327,6 +346,15 @@ class Show:
         self.pip = None
         self.bursts.append(Burst(W / 2, H * 0.42, G.HUMAN if who == "H" else G.AI))
         _sound("Hero" if who == "H" else "Sosumi")
+        if self.bank.ok:
+            history = [x["score"] for x in self.goals[:-1]]
+            payoff, tail = self.bank.goal(self.game, who, (self.score["H"], self.score["A"]), self.name_of(who),
+                                          self._fb(who), g["clock"], history)
+            self.voice.play(payoff, priority=1, max_age=5, interrupt=True)
+            self.voice.play(tail, priority=2, max_age=10)
+            if speed >= L.FAST_SPEED:
+                self.voice.play(self.bank.fast(speed), priority=3, max_age=12)
+            return
         self.voice.say(self._goal_line(who), priority=1, max_age=5, interrupt=True)
         tail = self._goal_tail(who, g["clock"])
         if tail:
@@ -383,7 +411,11 @@ class Show:
         else:
             line = L.FULL_TIME_WIN_H if h > a else L.FULL_TIME_WIN_A if a > h else L.FULL_TIME_DRAW
             text = L.fill(line, p=pl, ai=ai, h=h, a=a)
-        self.voice.say(text, priority=1, max_age=8, interrupt=True)
+        if self.bank.ok:
+            self.voice.play(self.bank.full_time(self.game, h, a, pl, ai, self._fb("H"), self._fb("A")),
+                            priority=1, max_age=15, interrupt=True)
+        else:
+            self.voice.say(text, priority=1, max_age=8, interrupt=True)
 
     def _save_summary(self):
         try:
@@ -469,13 +501,25 @@ class Show:
         if self.phase != LIVE:
             return
         left = self._clock(now)
-        if left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
+        if self.bank.ok:
+            if left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
+                self.said.add("60")
+                self.voice.play(self.bank.exact("clk_60"), priority=4, max_age=3)
+            if left <= 30.5 and "30" not in self.said and self.match_seconds > 40:
+                self.said.add("30")
+                self.voice.play(self.bank.line(["clk_30"], self.game), priority=3, max_age=3)
+            for n in range(10, 0, -1):          # "Ten! Nine! ... One!"
+                if left <= n + 0.2 and f"cd{n}" not in self.said:
+                    self.said.update(f"cd{m}" for m in range(n, 11))
+                    self.voice.play(self.bank.countdown(n), priority=2, max_age=0.8)
+                    break
+        elif left <= 60.5 and "60" not in self.said and self.match_seconds > 90:
             self.said.add("60")
             self.voice.say(L.pick(L.SECONDS_60), priority=4, max_age=3)
-        if left <= 30.5 and "30" not in self.said and self.match_seconds > 40:
+        if not self.bank.ok and left <= 30.5 and "30" not in self.said and self.match_seconds > 40:
             self.said.add("30")
             self.voice.say(L.pick(L.SECONDS_30), priority=3, max_age=3)
-        if left <= 10.5 and "10" not in self.said:
+        if not self.bank.ok and left <= 10.5 and "10" not in self.said:
             self.said.add("10")
             self.voice.say(L.pick(L.SECONDS_10_2P if self.game == 2 else L.SECONDS_10, p=self.player()),
                            priority=3, max_age=3)
@@ -885,7 +929,10 @@ class Show:
             self._scene_fulltime(canvas, t)
         elif name == "title":
             if first:
-                self.voice.say(L.pick(L.HIGHLIGHTS), priority=2, max_age=4)
+                if self.bank.ok:
+                    self.voice.play(self.bank.highlights_open(), priority=2, max_age=5)
+                else:
+                    self.voice.say(L.pick(L.HIGHLIGHTS), priority=2, max_age=4)
             n = len(self.goals)
             self._scene_title(canvas, t, "MATCH HIGHLIGHTS", f"{n} GOAL{'S' if n != 1 else ''}")
         elif name == "nogoals":
@@ -898,7 +945,12 @@ class Show:
             self._scene_card(canvas, t, arg)
         elif name == "replay":
             if first:
-                self.voice.say(self._goal_line(arg["who"]), priority=2, max_age=4)
+                if self.bank.ok:     # whisper over the slow motion, then the payoff
+                    self.voice.play(self.bank.replay(self.game) + self.bank.line(
+                        ["pay_ga_"] if (self.game == 1 and arg["who"] == "A") else ["pay_g_"], self.game,
+                        arg["name"], self._fb(arg["who"])), priority=2, max_age=6)
+                else:
+                    self.voice.say(self._goal_line(arg["who"]), priority=2, max_age=4)
             self._scene_replay(canvas, t, arg, now)
         elif name == "awards":
             self._scene_awards(canvas, t, arg, first)
@@ -979,9 +1031,14 @@ class Show:
             if tj < 0:
                 continue
             key = ("award", j)
-            if say and key not in self.results["said"]:
+            kind = {"ROCKET": "rocket", "THE WALL": "wall"}.get(title)
+            if (say or kind) and key not in self.results["said"]:
                 self.results["said"].add(key)
-                self.voice.say(say, priority=3, max_age=6)
+                if self.bank.ok and kind:
+                    fb = self._fb("A") if kind == "wall" else ("the-challenger" if self.game == 1 else "player-one")
+                    self.voice.play(self.bank.award(kind, who, fb), priority=3, max_age=8)
+                elif say:
+                    self.voice.say(say, priority=3, max_age=6)
             k = G.ease_out_back(tj / 0.5)
             cx = W // 2 + (j - (len(awards) - 1) / 2) * 470
             y0 = 250
@@ -997,6 +1054,8 @@ class Show:
         if first:
             col = G.HUMAN if h > a else G.AI if a > h else None
             self.results["confetti"] = G.Confetti(W, H, 170, col)
+            if self.bank.ok:
+                self.voice.play(self.bank.closing(self.game, h, a), priority=3, max_age=10)
         self.results["confetti"].draw(canvas, dt)
         if h == a:
             head, who, col = "IT'S A DRAW", f"{self.player()}  &  {self.ai_name()}", G.GOLD
