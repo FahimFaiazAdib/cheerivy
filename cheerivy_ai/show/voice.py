@@ -59,7 +59,8 @@ def _wav_seconds(path):
 CLIP_GAP_S = 0.14     # pause between clips of one sequence (name -> line -> score)
 LINE_GAP_S = 0.35     # breath between two separate lines
 WIN_MARGIN_S = 0.25
-ROBOT_START_S = 0.3   # Bluetooth + the DFPlayer finding the file on the card   # Windows takes a moment to start a sound: wait this much longer than the clip
+ROBOT_START_S = 0.3   # Bluetooth + the DFPlayer finding the file on the card
+ROBOT_MAIN_START_S = 0.5   # after starting the crowd loop, before an advert may be sent   # Windows takes a moment to start a sound: wait this much longer than the clip
 
 
 def _join(paths):
@@ -107,6 +108,8 @@ class Voice:
         self.robot_send = robot_send
         self.tracks = tracks or {}
         self._robot_stop = threading.Event()
+        self._main_start = self._main_end = 0.0   # the DFPlayer's main (crowd) track: started / runs out
+        self.bed_path = None          # the crowd loop (set by the show)
         self.speed = speed
         self.ready = False            # Kokoro worker loaded
         self.status = "off" if not enabled else "starting"
@@ -128,7 +131,7 @@ class Voice:
             threading.Thread(target=self._start_kokoro, daemon=True).start()
         else:
             self.status = FALLBACK_NAME
-        threading.Thread(target=self._player, daemon=True).start()
+        threading.Thread(target=self._player, daemon=True, name="voice").start()
 
     # ------------------------------------------------------------ Kokoro worker
     def _start_kokoro(self):
@@ -263,7 +266,7 @@ class Voice:
             pass
         if self.robot_send and self.busy:
             self._robot_stop.set()
-            self.robot_send("P0;")                    # stop the DFPlayer
+            self.robot_send("A0;")                    # stop the clip; the crowd carries on
         if IS_WIN:
             self._win_stop.set()
             try:
@@ -285,14 +288,38 @@ class Voice:
         self._current = subprocess.Popen(["afplay", path])
         self._current.wait()
 
+    def bed(self, path, loop=True):
+        """Start a crowd track as the DFPlayer's main track (the commentary plays over it).
+        loop=True: this is the murmur that keeps being restarted; False: play once (applause)."""
+        if not self.robot_send or path not in self.tracks:
+            return
+        if loop:
+            self.bed_path = path
+        self.robot_send(f"P{self.tracks[path]};")
+        self._main_start, self._main_end = time.time(), time.time() + _wav_seconds(path)
+
+    def stop_all(self):
+        if self.robot_send:
+            self.robot_send("P0;")
+            self._main_end = 0.0
+
     def _play_on_robot(self, paths, gen):
-        """Send the clips one by one to the DFPlayer, each after the previous one has finished."""
+        """Send the clips one by one to the DFPlayer as adverts over the crowd, each after the
+        previous one has finished. Adverts only play over a running main track, so the crowd loop
+        is (re)started first if it has run out."""
         for i, path in enumerate(paths):
             if gen != self._gen or self._stop:
                 return
+            if time.time() > self._main_end - 1.0 and self.bed_path:
+                self.bed(self.bed_path)
+            settle = self._main_start + ROBOT_MAIN_START_S - time.time()
+            if settle > 0:                                  # the DFPlayer is still opening the crowd track
+                time.sleep(settle)
             self._robot_stop.clear()
-            self.robot_send(f"P{self.tracks[path]};")
-            wait = _wav_seconds(path) + ROBOT_START_S + (CLIP_GAP_S if i < len(paths) - 1 else 0)
+            self.robot_send(f"A{self.tracks[path]};")
+            d = _wav_seconds(path)
+            self._main_end += d + ROBOT_START_S             # the crowd is paused meanwhile
+            wait = d + ROBOT_START_S + (CLIP_GAP_S if i < len(paths) - 1 else 0)
             if self._robot_stop.wait(wait):
                 return
 
@@ -337,6 +364,7 @@ class Voice:
     def close(self):
         self._stop = True
         self.hush()
+        self.stop_all()
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.stdin.close()

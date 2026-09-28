@@ -198,6 +198,11 @@ class VoiceBank:
     def replay(self, game):
         return self.line(["hl_w_0", "hl_w_ai_"] if game == 1 else ["hl_w_0"], game)
 
+    def sfx(self, name):
+        """A crowd sound (voice_bank/crowd/<name>.wav: ambience, roar, applause, whistle, ooh1, ooh2)."""
+        p = os.path.join(self.dir, "crowd", f"{name}.wav")
+        return [p] if os.path.exists(p) else []
+
     def intro(self, game):
         return self.line(["intro_0", "intro_ai_", "intro_pvp_"], game)
 

@@ -50,6 +50,7 @@ MAX_REEL = 6               # goals shown in the highlight reel
 FILL_GAP_S = 7.0      # silence this long during play -> a filler line (7-12 s, random)
 CHAT_GAP_S = 4.0      # in-play lines: at most one every this many seconds
 CHAT_BIG_GAP_S = 1.5  #   ... but a milestone (5-touch rally, 3 saves) only needs this gap
+CHAT_OOH_P = 0.5     # chance of a crowd 'ooh' when a shot is saved
 CHAT_SHOT_P = 0.35    # chance of a build-up line ("Here it comes!") on a new shot
 CHAT_LOST_S = 2.5     # ball out of sight this long -> "Where is it?"
 CHAT_REST_S = 6.0     # ball resting this long -> a quiet line ("A moment to breathe.")
@@ -116,6 +117,9 @@ class Show:
                            robot_send=self.send if on_robot else None, tracks=self.bank.tracks)
         if on_robot:
             print(f"[voice] commentary plays on the robot's speaker ({len(self.bank.tracks)} tracks on the SD card)")
+            amb = self.bank.sfx("ambience")
+            if amb:
+                self.voice.bed_path = amb[0]      # the crowd murmur starts with the first line
         if self.bank.ok and voice:
             self.voice.status = f"voice bank ({len(self.bank.clips)} clips)"
             print(f"[voice] using the recorded voice bank: {len(self.bank.clips)} clips")
@@ -339,7 +343,10 @@ class Show:
             self.match_folder = folder
         self._set_phase(LIVE)
         if announce and self.bank.ok:
-            self.voice.play(self.bank.kickoff(self.game, self.player(), self.ai_name(), self._fb("H"), self._fb("A")),
+            if self.voice.bed_path:
+                self.voice.bed(self.voice.bed_path)           # fresh crowd for the new match
+            self.voice.play(self.bank.sfx("whistle") + self.bank.kickoff(self.game, self.player(), self.ai_name(),
+                                                                          self._fb("H"), self._fb("A")),
                             priority=2, max_age=8, interrupt=True)
         elif announce:
             self.voice.say(L.pick(L.KICKOFF_2P if self.game == 2 else L.KICKOFF, p=self.player(), ai=self.ai_name()),
@@ -442,8 +449,12 @@ class Show:
             line = L.FULL_TIME_WIN_H if h > a else L.FULL_TIME_WIN_A if a > h else L.FULL_TIME_DRAW
             text = L.fill(line, p=pl, ai=ai, h=h, a=a)
         if self.bank.ok:
-            self.voice.play(self.bank.full_time(self.game, h, a, pl, ai, self._fb("H"), self._fb("A")),
+            self.voice.play(self.bank.sfx("whistle") + self.bank.full_time(self.game, h, a, pl, ai,
+                                                                            self._fb("H"), self._fb("A")),
                             priority=1, max_age=15, interrupt=True)
+            applause = self.bank.sfx("applause")
+            if applause:
+                self.voice.bed(applause[0], loop=False)       # the crowd applauds under the full-time call
         else:
             self.voice.say(text, priority=1, max_age=8, interrupt=True)
 
@@ -587,6 +598,8 @@ class Show:
 
         if st.ai_saves > c["saves"] and st.ai_saves in (3, 5):
             line, big = self.bank.exact("cb_sv3" if st.ai_saves == 3 else "cb_sv5"), True
+        elif st.ai_saves > c["saves"] and random.random() < CHAT_OOH_P:
+            line, big = self.bank.sfx(random.choice(("ooh1", "ooh2"))), True     # the crowd groans
         elif st.rally > c["rally"] and st.rally in (5, 8, 12, 16) and now - c.get("rally_t", 0) > CHAT_RALLY_GAP_S:
             c["rally_t"] = now
             line, big = self.bank.exact("rally_gen" if st.rally == 16 else f"rally_{st.rally:02d}"), True
