@@ -148,6 +148,10 @@ def main():
                 pred.reset()  # lost the ball for a while — forget old motion
 
             cmd, fire, status = ctrl.update(pred, carriage_x, now)
+            if ctrl.swap_request:
+                ctrl.swap_request = False
+                link.swap = not link.swap
+                print(f"[ai] carriage moved the wrong way twice -> L/R swap {'ON' if link.swap else 'OFF'} automatically")
             if paused:
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"

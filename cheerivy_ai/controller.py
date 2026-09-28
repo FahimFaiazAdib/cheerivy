@@ -24,6 +24,7 @@ class Controller:
         # carriage is driven against an end and stops moving (camera calibration is never exact).
         self.rail_lo, self.rail_hi = C.CARRIAGE_MIN_X, C.CARRIAGE_MAX_X
         self.motor_speed = C.MOTOR_SPEED_CM_S   # learned while playing
+        self.swap_request = False                # set when the carriage keeps moving the wrong way
         self._move_cmd, self._move_end, self._wait_end, self._move_from = "S", 0.0, 0.0, None
 
     def set_difficulty(self, level):
@@ -102,6 +103,11 @@ class Controller:
                 elif dur >= 0.08 and moved > C.STALL_MOVE_CM:
                     v = min(max(moved / dur, 5.0), 200.0)
                     self.motor_speed = 0.6 * self.motor_speed + 0.4 * v
+                elif dur >= 0.08 and moved < -C.WRONG_WAY_CM:
+                    # Clearly went the opposite way (camera image mirrored, motor wires swapped...).
+                    # The geared N20 can't be pushed that far by the ball, so this is real:
+                    # ask main.py to swap L and R.
+                    self.swap_request = True
                 self._move_from = None
             err = self.target - carriage_x
             band = C.DEADBAND_CM if self.moving != "S" else C.DEADBAND_CM + C.HYSTERESIS_CM
