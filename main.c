@@ -495,7 +495,10 @@ static void play_match(uint8_t game, uint8_t level) {
     /* ---------------- AI side: laptop AI / Mirror AI / player 2 ---------------- */
     uint32_t last_rx;
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
-    uint8_t link_now = rx_seen && (now - last_rx < LINK_TIMEOUT_MS);
+    /* A byte can arrive after `now` was read, making last_rx newer than now. Unsigned
+       now - last_rx would then wrap to ~49 days and look like "laptop gone". */
+    uint32_t rx_age = (last_rx > now) ? 0 : now - last_rx;
+    uint8_t link_now = rx_seen && (rx_age < LINK_TIMEOUT_MS);
     if (link_now != link_up) {
       link_up = link_now;
       if (game == 1) {                  /* in 2P nobody cares which AI would be playing */
@@ -520,7 +523,7 @@ static void play_match(uint8_t game, uint8_t level) {
         rx_fire = rx_freeze = 0;        /* the laptop AI is only watching in 2P */
       } else if (link_up) {
         ai_dir = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
-        if (now - last_rx >= LINK_HOLD_MS) ai_dir = 0;   /* laptop quiet for a moment: wait, don't guess */
+        if (rx_age >= LINK_HOLD_MS) ai_dir = 0;   /* laptop quiet for a moment: wait, don't guess */
         if (rx_fire) { rx_fire = 0; servo_fire(SERVO_AI, now); }
         if (rx_freeze) {
           rx_freeze = 0;
