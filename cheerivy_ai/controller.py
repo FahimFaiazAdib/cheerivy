@@ -45,9 +45,15 @@ class Controller:
             x_hit = t_hit = None
             self._in_shot = False
             pos = predictor.position
-            # No incoming shot: shadow the ball's x, drifting toward the centre.
-            desired = self.centre if pos is None else 0.5 * pos[0] + 0.5 * self.centre
-            status = "TRACKING" if pos else "NO BALL"
+            near = pos is not None and pos[1] <= C.AI_LINE_Y + C.NEAR_BALL_CM
+            if near:
+                # Slow or resting ball right in front: go to it (it's not coming by itself).
+                desired = pos[0]
+                status = "BALL AT MY FEET"
+            else:
+                # No incoming shot: shadow the ball's x, drifting toward the centre.
+                desired = self.centre if pos is None else 0.5 * pos[0] + 0.5 * self.centre
+                status = "TRACKING" if pos else "NO BALL"
 
         desired = min(max(desired, C.CARRIAGE_MIN_X), C.CARRIAGE_MAX_X)  # rail limits
 
@@ -73,6 +79,8 @@ class Controller:
                 and t_hit <= C.FIRE_LEAD_S
                 and abs(x_hit - carriage_x) <= C.FIRE_REACH_CM
                 and now - self.last_fire > C.FIRE_COOLDOWN_S)
+        if x_hit is None and near and now - self.last_fire > C.FIRE_COOLDOWN_S:
+            fire = abs(pos[0] - carriage_x) <= C.FIRE_REACH_CM - 1.0   # lined up: hit it
         if fire:
             self.last_fire = now
             status = "FIRE!"

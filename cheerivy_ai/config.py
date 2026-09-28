@@ -74,6 +74,7 @@ HYSTERESIS_CM = 1.0     # extra margin before starting to move again
 FIRE_REACH_CM = CARRIAGE_W / 2  # flipper covers carriage_x ± this
 FIRE_LEAD_S = 0.12      # fire this long before predicted arrival (servo swing time)
 FIRE_COOLDOWN_S = 0.6
+NEAR_BALL_CM = 4.0      # a slow ball this close in front of the AI line: go to it and hit it
 HEARTBEAT_S = 0.1       # resend current command this often (firmware falls back to Mirror AI after 400 ms)
 SWAP_LR = False         # True if the carriage drives the WRONG way (press 'x' live to test)
 
