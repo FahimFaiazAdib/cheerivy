@@ -33,6 +33,7 @@ LINES = {
                  "Welcome to Cheerivy! Two rivals, one table, and only one of them walks away a winner."],
     "intro_aivai": ["Welcome to Cheerivy! Tonight there are no hands on the controls. Machine against machine!"],
     "battle": ["We are about to witness a battle between {p} and {v}!"],
+    "battle_aivai": ["In one corner, {p}. In the other, {v}. No nerves, no mercy. Just two machines and one ball!"],
     "rules_clock": [
         "{mins} on the clock. And if it's level at the end, a golden goal will settle it.",
         "We have {mins} on the clock, and should it finish level, the next goal wins it.",
@@ -43,6 +44,9 @@ LINES = {
         "freezes their opponent for {fs} seconds. Press too early, and nothing happens.",
         "Keep one ear on the buzzer! When it sounds, the first to press their button freezes the other "
         "side for {fs} seconds. So stay sharp!",
+    ],
+    "rules_buzz_aivai": [
+        "And listen for the buzzer! When it sounds, the quicker machine freezes its rival for {fs} seconds.",
     ],
     "kickoff": [
         "{p}, you have the privilege to start. Place the ball just in front of your carriage, "
@@ -60,10 +64,10 @@ LINES = {
         "Player One, set the ball in front of the machine's carriage for the restart, and push your joystick forward when you're ready.",
     ],
     "kickoff_aivai": [
-        "{p} will start. Place the ball just in front of {p}'s carriage, and push either joystick forward when you're ready.",
+        "{p} will kick off. Could someone place the ball just in front of {p}'s carriage, and push either joystick forward when ready.",
     ],
     "place_aivai": [
-        "Place the ball in front of {p}'s carriage for the restart, and push either joystick forward when you're ready.",
+        "Could someone place the ball in front of {p}'s carriage for the restart, and push either joystick forward when ready.",
     ],
     "place_any": ["Set the ball back in play, and push your joystick forward when you're ready."],
     "countdown": [["cd_03"], ["cd_02"], ["cd_01"]],          # picked by number
@@ -153,6 +157,7 @@ LINES = {
                   "It's all over! The machine triumphs, {hi}–{lo}!"],
     "result_draw_ai": [["ft_draw_ai"], "It's all over, and honours are even at {a}–{b}!"],
     "result_draw_2p": [["ft_draw_pvp"], "It's all over, and honours are even at {a}–{b}!"],
+    "result_draw_aivai": [["ft_over", "fill_lvl_01"], "It's all over, and nothing can separate these two machines!"],
     "outro": [["outro_01"], ["outro_03"], ["outro_02"],
               "What a contest that was! Thank you for joining us at Cheerivy, and until next time, goodnight!"],
     # ---- highlights (captions only, for now)
@@ -166,7 +171,7 @@ WORDS = ("nil", "one", "two", "three", "four", "five", "six", "seven", "eight", 
          "nineteen", "twenty")
 MINUTES = {60: "one minute", 120: "two minutes", 180: "three minutes", 300: "five minutes"}
 NAME_SLUG = {"Player One": "player-one", "Player Two": "player-two", "the machine": "the-machine",
-             "the challenger": "the-challenger"}
+             "Machine One": "machine-one", "Machine Two": "machine-two"}
 
 
 def W(n):
@@ -179,9 +184,9 @@ def cap(s):
 
 # tone of the F5 reference each written moment is rendered with (ui/render_lines.py)
 TONE = {"own_goal": "erupt", "own_goal_ai": "erupt", "rollback": "build", "goal": "erupt", "goal_beats_ai": "erupt", "goal_ai": "erupt", "golden_winner": "erupt", "golden": "erupt",
-        "buzz_win": "erupt", "buzz_win_ai": "erupt", "battle": "build", "clk_30": "build", "clk_10": "build",
+        "buzz_win": "erupt", "buzz_win_ai": "erupt", "battle": "build", "battle_aivai": "build", "clk_30": "build", "clk_10": "build",
         "save": "build", "save_close": "build", "hit_fast": "build", "wall": "build", "rally_more": "build",
-        "late_trail": "build", "live_again": "build", "buzz_none": "build", "rules_buzz": "build"}   # else calm
+        "late_trail": "build", "live_again": "build", "buzz_none": "build", "rules_buzz": "build", "rules_buzz_aivai": "build"}   # else calm
 
 
 def written_key(moment, i, text):

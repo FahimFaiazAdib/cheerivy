@@ -186,21 +186,27 @@ class Flow:
         return bool(f and f())
 
     # ---------------------------------------------------------------- names
-    # AI vs AI: the camera AI drives player 1's carriage too (blue tape): "the challenger"
+    # AI vs AI: the camera AI drives both carriages (blue tape on player 1's): Machine One / Machine Two
     def name(self, p):
+        if self.mode == "aivai":
+            return "MACHINE ONE" if p == 1 else "MACHINE TWO"
         if p == 1:
-            return "THE CHALLENGER" if self.mode == "aivai" else "PLAYER ONE"
-        return "CHEERIVY AI" if self.mode in ("ai", "aivai") else "PLAYER TWO"
+            return "PLAYER ONE"
+        return "CHEERIVY AI" if self.mode == "ai" else "PLAYER TWO"
 
     def spoken(self, p):
+        if self.mode == "aivai":
+            return "Machine One" if p == 1 else "Machine Two"
         if p == 1:
-            return "the challenger" if self.mode == "aivai" else "Player One"
-        return "the machine" if self.mode in ("ai", "aivai") else "Player Two"
+            return "Player One"
+        return "the machine" if self.mode == "ai" else "Player Two"
 
     def tag(self, p):
+        if self.mode == "aivai":
+            return f"M{p}"
         if p == 1:
-            return "CH" if self.mode == "aivai" else "P1"
-        return "AI" if self.mode in ("ai", "aivai") else "P2"
+            return "P1"
+        return "AI" if self.mode == "ai" else "P2"
 
     def machine(self, p):
         """Is side p played by the AI?"""
@@ -414,10 +420,11 @@ class Flow:
         mins = MINUTES.get(self.length_s, f"{self.length_s // 60} minutes")
         steps = [(None, "sfx:swell", 3.0),
                  self._L({"ai": "intro_ai", "aivai": "intro_aivai"}.get(self.mode, "intro_2p")),
-                 self._L("battle", p=self.spoken(1), v=self.spoken(2)),
+                 self._L("battle_aivai" if self.mode == "aivai" else "battle", p=self.spoken(1), v=self.spoken(2)),
                  self._L("rules_clock" if self.settings["golden"] else "rules_clock_plain", mins=mins)]
         if self.settings["freeze"]:                 # the buzzer rule, once, before kick-off
-            steps.append(self._L("rules_buzz", fs=self.settings["freeze_s"]))
+            steps.append(self._L("rules_buzz_aivai" if self.mode == "aivai" else "rules_buzz",
+                                 fs=self.settings["freeze_s"]))
         self._run(steps, lambda: self._restart_for(1, kickoff=True))
 
     def _restart_for(self, c, kickoff=False):
@@ -491,8 +498,6 @@ class Flow:
                     else self._L("own_goal", v=self.spoken(3 - p), p=self.spoken(p)))
         elif self.mode == "ai":
             call = self._L("goal_ai") if p == 2 else self._L("goal_beats_ai", p=self.spoken(p))
-        elif self.mode == "aivai" and p == 2:
-            call = self._L("goal_ai")
         else:
             call = self._L("goal", p=self.spoken(p))
         key, text = self._score_line()
@@ -528,7 +533,7 @@ class Flow:
         self.buzz_result = {"winner": p, "victim": victim, "until": self.now + BUZZ_SHOW_S}
         self._robot(f"freeze {victim} {fs}")
         self._hook("hush")                  # the race result is news: it cuts any short call
-        if self.machine(p) and p == 2:
+        if self.mode == "ai" and p == 2:
             self._speak("buzz_win_ai", v=self.spoken(victim), fs=fs)
         else:
             self._speak("buzz_win", p=self.spoken(p), v=self.spoken(victim), fs=fs)
@@ -580,7 +585,7 @@ class Flow:
             if info.get("close"):
                 self._short("save_close", 1.0)
             elif info.get("speed", 0) >= FAST_SHOT:
-                self._short("hit_fast_ai" if (self.machine(p) and p == 2) else "hit_fast", 0.7)
+                self._short("hit_fast_ai" if (self.mode == "ai" and p == 2) else "hit_fast", 0.7)
             else:
                 self._short("save", SAVE_CALL_P)
         elif kind == "wall":
@@ -595,7 +600,7 @@ class Flow:
         elif kind == "rest":
             p = a[0]
             if not self._busy():
-                if self.machine(p) and p == 2:
+                if self.mode == "ai" and p == 2:
                     self._speak("rest_ai")
                 elif self.mode == "aivai":
                     self._speak("rest_side", p=self.spoken(p))
@@ -703,7 +708,7 @@ class Flow:
         a, b = self.score
         hi, lo = max(a, b), min(a, b)
         if a == b:
-            call = self._L("result_draw_ai" if self.mode == "ai" else "result_draw_2p", a=a, b=b)
+            call = self._L({"ai": "result_draw_ai", "aivai": "result_draw_aivai"}.get(self.mode, "result_draw_2p"), a=a, b=b)
             winner = None
         else:
             winner, loser = (1, 2) if a > b else (2, 1)

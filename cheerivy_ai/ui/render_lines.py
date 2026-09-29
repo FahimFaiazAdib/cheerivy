@@ -23,14 +23,16 @@ SHOW = os.path.join(os.path.dirname(HERE), "show")
 sys.path[:0] = [HERE, SHOW]
 from commentary import LINES, MINUTES, RENDERED_DIR, TONE, W, cap, written_key  # noqa: E402
 
-NAMES = ("Player One", "Player Two", "the machine", "the challenger")
+NAMES = ("Player One", "Player Two", "the machine", "Machine One", "Machine Two")
 HUMANS = ("Player One", "Player Two")
 PAIRS = (("Player One", "the machine"), ("the machine", "Player One"),
          ("Player One", "Player Two"), ("Player Two", "Player One"),
-         ("the challenger", "the machine"), ("the machine", "the challenger"))     # AI vs AI
+         ("Machine One", "Machine Two"), ("Machine Two", "Machine One"))     # AI vs AI
+MACHINES = ("Machine One", "Machine Two")
+PAIRS_FOR = {"battle": PAIRS[:4], "battle_aivai": PAIRS[4:5]}
 SINGLE = {"kickoff": ("Player One",), "place": HUMANS, "rest": HUMANS, "goal": HUMANS,
-          "goal_beats_ai": ("Player One",), "kickoff_aivai": ("the challenger",),
-          "place_aivai": ("the challenger", "the machine"), "rest_side": ("the challenger",)}   # else every name
+          "goal_beats_ai": ("Player One",), "buzz_win_ai": HUMANS[:1], "kickoff_aivai": ("Machine One",),
+          "place_aivai": MACHINES, "rest_side": MACHINES}   # else every name
 NUMBERS = {"unbeaten": range(5, 11), "next_big": range(2, 5), "rally_more": range(17, 33, 5)}
 FREEZE_S = (3,)          # the default freeze length (other settings: subtitle only)
 RECORDED_ENOUGH = {"goal", "goal_beats_ai", "goal_ai"}   # the voice bank already has plenty of these
@@ -45,7 +47,7 @@ def forms(moment, template):
     axes = []
     for pair in (("p", "v"), ("lead", "trail")):
         if set(pair) <= fields:
-            axes.append([dict(zip(pair, x)) for x in PAIRS])
+            axes.append([dict(zip(pair, x)) for x in PAIRS_FOR.get(moment, PAIRS)])
             fields -= set(pair)
     for f in sorted(fields):
         if f in ("p", "v", "lead", "trail"):
