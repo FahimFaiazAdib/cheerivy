@@ -553,3 +553,5 @@ body.cal-on #caption .txt { font-size: 24px; }
 #asleep { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; gap: 26px; align-items: center;
   justify-content: center; background: var(--bg); cursor: pointer; text-align: center; }
 #asleep b { font: italic 900 70px/1 var(--display); } #asleep small { font: 600 30px/1 var(--body); color: var(--dim); }
+.rows.many { top: 290px; gap: 10px; }               /* long lists (Camera & AI): all rows above the hints */
+.rows.many .row { height: 66px; font-size: 34px; }

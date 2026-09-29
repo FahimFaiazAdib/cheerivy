@@ -196,7 +196,7 @@ const SCREENS = {
     <div class="screen settings">
       <div class="head"><div class="kicker">SETTINGS${group ? ' · ' + esc(group).toUpperCase() : ''}</div>
         <div class="question">${group ? esc(group) : 'Settings'}</div></div>
-      <div class="rows ${group ? '' : 'groups'}">${rows}</div>
+      <div class="rows ${group ? '' : 'groups'} ${m.items.length > 6 ? 'many' : ''}">${rows}</div>
       ${hints(['v', 'Choose'], ...(group ? [['h', 'Change']] : []), ['btn', 'Select'])}
     </div>`, root => {
       root.querySelectorAll('[data-v]').forEach(e => {
