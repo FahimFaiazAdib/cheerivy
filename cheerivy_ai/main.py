@@ -140,6 +140,14 @@ def main():
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
     servos, p1_asked = {1: None, 2: None}, False   # each player's servo angles, as reported by the robot
     tune = 1                                        # which player's servo the [ ] - = / keys change
+    # The angles are also kept here on the laptop: burning the chip erases its EEPROM, so on every
+    # connect the saved angles are sent back to the robot.
+    ANGLES_FILE = "servo_angles.json"
+    try:
+        with open(ANGLES_FILE) as f:
+            saved_angles = {int(k): v for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        saved_angles = {}
     TUNE_CMD = {1: ("H", "J", "U"), 2: ("Q", "W", "T")}   # rest, strike, test/report
     sound_test, sound_next_t, sound_i = False, 0.0, 0
     df_volume = C.ROBOT_VOLUME
@@ -191,8 +199,14 @@ def main():
             if not p1_asked and link.ser and not args.sim:
                 p1_asked = True
                 link.send(f"V{df_volume};")                # robot speaker volume from config.py
-                link.send("U0;")                        # the robot replies "P1SERVO <rest> <strike>"
-                link.send("T0;")                        # ... and "P2SERVO <rest> <strike>"
+                for who, (c_rest, c_strike, c_test) in TUNE_CMD.items():
+                    a = saved_angles.get(who)
+                    if a:                               # put the laptop's saved angles back on the robot
+                        link.send(f"{c_rest}{a['rest']};{c_strike}{a['strike']};")
+                        print(f"[servo] sending player {who}'s saved angles to the robot: "
+                              f"rest {a['rest']}°, strike {a['strike']}°")
+                    else:
+                        link.send(f"{c_test}0;")        # the robot replies "P<n>SERVO <rest> <strike>"
             if fire:
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
@@ -202,6 +216,12 @@ def main():
                         _, r, s_ = line.split()
                         who = int(line[1])
                         servos[who] = {"rest": int(r), "strike": int(s_)}
+                        saved_angles[who] = servos[who]
+                        try:
+                            with open(ANGLES_FILE, "w") as f:
+                                json.dump(saved_angles, f)
+                        except OSError:
+                            pass
                         mark = "  <- [ ] - = / tune this one" if who == tune else ""
                         print(f"[servo] player {who}: rest {r}°, strike {s_}°, swing {abs(int(r) - int(s_))}° "
                               f"(saved on the robot){mark}")

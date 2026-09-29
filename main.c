@@ -91,8 +91,8 @@ static const uint16_t MIRROR_DELAY_MS[3] = {300, 180, 80};  /* easy, medium, har
  *   HUMAN_STRIKE_DEG to 155 (= 90 + 65).                                                  */
 #define AI_REST_DEG            87
 #define AI_STRIKE_DEG          20
-#define HUMAN_REST_DEG         100   /* 10° further back than before: more run-up before the ball */
-#define HUMAN_STRIKE_DEG       33    /* 67° swing, the same as the AI servo */
+#define HUMAN_REST_DEG         97    /* tuned on the robot (live, from the laptop) */
+#define HUMAN_STRIKE_DEG       56    /* 41° swing, tuned on the robot */
 
 /* MG90S: 0.10 s / 60° at 4.8-5 V = 1.6 ms per degree (0.08 s / 60° at 6 V -> use 13).     */
 #define SERVO_MS_PER_DEG_X10   16
