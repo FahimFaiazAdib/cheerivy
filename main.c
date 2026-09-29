@@ -126,10 +126,6 @@ static uint8_t ai_rest = AI_REST_DEG, ai_strike = AI_STRIKE_DEG;      /* tunable
 static uint8_t human_rest = HUMAN_REST_DEG, human_strike = HUMAN_STRIKE_DEG;
 #define HUMAN_TRAVEL_MS        TRAVEL_MS(human_rest, human_strike)       /* ~119 ms for 67° */
 #define HUMAN_CONTACT_MS       (HUMAN_TRAVEL_MS * 2 / 3)  /* ball is hit ~2/3 into the swing */
-/* A loaded servo is slower than its datasheet: with a short swing (41° -> 81 ms) player 1's arm was
-   called back before it reached the strike angle and stopped halfway. Both strikers hold the strike
-   at least this long, so both sides stay equally fast. */
-#define SERVO_HOLD_MIN_MS      150
 
 /* ============================================================== TIME (Timer0, 1 ms) */
 static volatile uint32_t g_ms;
@@ -179,22 +175,26 @@ static uint8_t servo_ready(uint8_t s, uint32_t now) { return now >= servo_ready_
 static void servo_fire(uint8_t s, uint32_t now) {
   if (!servo_ready(s, now)) return;
   uint16_t travel = (s == SERVO_AI) ? AI_TRAVEL_MS : HUMAN_TRAVEL_MS;
-  if (travel < SERVO_HOLD_MIN_MS) travel = SERVO_HOLD_MIN_MS;
   servo_write(s, SERVO_US(s == SERVO_AI ? ai_strike : human_strike));
   servo_out[s] = 1;
   servo_back_at[s] = now + travel;
-  servo_ready_at[s] = now + travel;   /* can strike again as soon as the arm starts back */
+  servo_ready_at[s] = now + 2UL * travel;
 }
 
-/* A joystick strikes once per push: let go (back to centre) to strike again. Holding it forward
-   can't keep the arm out as a wall. Returns 1 if it struck. */
-static uint8_t joy_armed[2] = {1, 1};
-static uint8_t joy_fire(uint8_t s, uint8_t pushed, uint32_t now) {
-  if (!pushed) { joy_armed[s] = 1; return 0; }
-  if (!joy_armed[s] || !servo_ready(s, now)) return 0;
-  joy_armed[s] = 0;
-  servo_fire(s, now);
-  return 1;
+/* A player's joystick drives the arm directly, no timers: pushed forward = the arm goes to the
+   strike angle and stays there, let go = it goes back to rest. Returns 1 at the moment it's pushed. */
+static uint8_t joy_down[2];
+static uint8_t joy_hold(uint8_t s, uint8_t pushed, uint32_t now) {
+  if (pushed == joy_down[s]) return 0;
+  joy_down[s] = pushed;
+  servo_out[s] = 0;                    /* cancel any timed return */
+  if (pushed) {
+    servo_write(s, SERVO_US(s == SERVO_AI ? ai_strike : human_strike));
+  } else {
+    servo_write(s, SERVO_US(s == SERVO_AI ? ai_rest : human_rest));
+    servo_ready_at[s] = now;
+  }
+  return pushed;
 }
 
 static void servo_update(uint32_t now) {
@@ -733,7 +733,7 @@ static void play_match(uint8_t game, uint8_t level) {
     } else if (now >= human_frozen_until) {
       uint16_t x = adc_read(1), y = adc_read(3);
       human_dir = joy_dir(x);
-      if (joy_fire(SERVO_HUMAN, y > JOY_HIGH, now)) {
+      if (joy_hold(SERVO_HUMAN, y > JOY_HIGH, now)) {
         /* the ball leaves when the arm hits it, ~2/3 into the swing */
         if (!mirror_fire_at) mirror_fire_at = now + HUMAN_CONTACT_MS + MIRROR_FIRE_DELAY_MS;
       }
@@ -744,6 +744,8 @@ static void play_match(uint8_t game, uint8_t level) {
         PLAY(SND_SIREN);
       }
       btn_was_down = down;
+    } else {
+      joy_hold(SERVO_HUMAN, 0, now);   /* frozen: the arm goes back */
     }
     motor_human(human_dir);
     mirror_record(now, human_dir);
@@ -755,7 +757,7 @@ static void play_match(uint8_t game, uint8_t level) {
       if (game == 2) {
         uint16_t x2 = adc_read(0), y2 = adc_read(2);
         ai_dir = P2_DIR_SIGN * joy_dir(x2);
-        joy_fire(SERVO_AI, y2 > JOY_HIGH, now);
+        joy_hold(SERVO_AI, y2 > JOY_HIGH, now);
         uint8_t down2 = freeze2_btn_down();
         if (down2 && !btn2_was_down && now >= ai_freeze_ready) {
           human_frozen_until = now + FREEZE_MS;
@@ -794,6 +796,7 @@ static void play_match(uint8_t game, uint8_t level) {
       }
     } else {
       rx_fire = rx_freeze = 0;          /* frozen: ignore queued actions */
+      joy_hold(SERVO_AI, 0, now);       /* player 2's arm goes back */
     }
     motor_ai(ai_dir);
 
@@ -942,13 +945,14 @@ static void screen_game(void) {
         if (rx_fire1) servo_fire(SERVO_HUMAN, now);
       } else {
         d1 = s1.xs;
-        joy_fire(SERVO_HUMAN, s1.ys > 0, now);
+        joy_hold(SERVO_HUMAN, s1.ys > 0, now);
         if (game == 4) {                       /* debug: the laptop's keyboard too */
           if (!d1 && rx_age < LINK_HOLD_MS) d1 = (rx_move1 == 'B') ? -1 : (rx_move1 == 'N') ? 1 : 0;
           if (rx_fire1) servo_fire(SERVO_HUMAN, now);
         }
       }
     }
+    if (!play || now < human_frozen_until) joy_hold(SERVO_HUMAN, 0, now);
     rx_fire1 = rx_freeze1 = 0;
     motor_human(d1);
 
@@ -957,7 +961,7 @@ static void screen_game(void) {
     if (play && now >= ai_frozen_until) {
       if (game == 2 || game == 4) {
         d2 = s2.xs;
-        joy_fire(SERVO_AI, s2.ys > 0, now);
+        joy_hold(SERVO_AI, s2.ys > 0, now);
         if (game == 4) {                       /* debug: the laptop's keyboard too */
           if (!d2 && rx_age < LINK_HOLD_MS) d2 = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
           if (rx_fire) servo_fire(SERVO_AI, now);
@@ -968,6 +972,7 @@ static void screen_game(void) {
         if (rx_fire) servo_fire(SERVO_AI, now);
       }
     }
+    if (!play || now < ai_frozen_until) joy_hold(SERVO_AI, 0, now);
     rx_fire = rx_freeze = 0;
     motor_ai(d2);
 
