@@ -1,6 +1,7 @@
-// AI VISION: the top-down board drawn from the AI's numbers (cm, as in config.py).
-// The laptop will send state.board = {ball:[x,y]|null, path:[[x,y],...], ai_x, p1_x}.
-// Until it does (simulator), a fake rally is played here so the screen can be designed.
+// AI VISION: the table seen from above, with what the AI thinks on top of it (cm, as in config.py).
+// Live game (state.video): the real camera picture (/video, the calibrated top-down view) with the
+//   predicted path, the landing point and a ring on the ball drawn over it.
+// Simulator: a drawn board. state.board = {ball, vel, path, path1 (player 1's AI), ai_x, p1_x}.
 const Board = (() => {
   // board geometry (cm), sent by the laptop as state.arena (from config.py / calibration)
   let W = 44, H = 46, RAIL = [3, 41], DEPTH = 4, CW = 10, R = 2, SHAPE = [[3, 0], [41, 0], [41, 46], [3, 46]];
@@ -16,6 +17,16 @@ const Board = (() => {
   }
 
   const cv = document.getElementById('board');
+  let video = null;                         // the live camera stream (an <img> that keeps updating)
+  function liveImage() {
+    if (!video) {
+      video = document.createElement('img');
+      video.src = '/video';
+      video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none';
+      document.body.appendChild(video);
+    }
+    return video.naturalWidth ? video : null;
+  }
   const ctx = cv.getContext('2d');
   let s = 18, ox = 0, oy = 0, last = performance.now();
   const trail = [];
@@ -105,7 +116,17 @@ const Board = (() => {
     }
     const w = cv.clientWidth, h = cv.clientHeight;
     ctx.clearRect(0, 0, w, h);
+    const img = st && st.video ? liveImage() : null;
 
+    if (img) {                               // the real table, straight from the camera
+      ctx.save();
+      ctx.beginPath(); ctx.roundRect(ox, oy, W * s, H * s, 10); ctx.clip();
+      ctx.drawImage(img, ox, oy, W * s, H * s);
+      ctx.fillStyle = 'rgba(4,8,16,.18)'; ctx.fillRect(ox, oy, W * s, H * s);   // a touch darker: overlays pop
+      ctx.restore();
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(200,225,255,.35)';
+      ctx.beginPath(); ctx.roundRect(ox, oy, W * s, H * s, 10); ctx.stroke();
+    } else {
     // pitch
     ctx.save();
     ctx.beginPath(); SHAPE.forEach(([x, y], i) => { const [X, Y] = px(x, y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.closePath();
@@ -127,31 +148,49 @@ const Board = (() => {
     [, ly] = px(0, P1_Y); ctx.beginPath(); ctx.moveTo(ox, ly); ctx.lineTo(ox + W * s, ly); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
+    }
 
     const fz = (st && st.freeze) || {};
-    carriage(b.ai_x ?? W / 2, true, '#1fd5f5', fz['2'] && fz['2'].frozen > 0, t);
-    if (b.p1_x != null) carriage(b.p1_x, false, '#ff5b2e', fz['1'] && fz['1'].frozen > 0, t);
+    if (img) {                               // real carriages are in the picture: mark them, ice when frozen
+      [[b.ai_x, true, '#1fd5f5', fz['2']], [b.p1_x, false, '#ff5b2e', fz['1']]].forEach(([x, top, col, f]) => {
+        if (x == null) return;
+        const [a, y0] = px(x - CW / 2, top ? 0 : H - DEPTH), [c, y1] = px(x + CW / 2, top ? DEPTH : H);
+        ctx.save();
+        ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.shadowColor = col; ctx.shadowBlur = 14;
+        ctx.strokeRect(a, y0, c - a, y1 - y0);
+        if (f && f.frozen > 0) { ctx.fillStyle = 'rgba(190,240,255,.45)'; ctx.fillRect(a, y0, c - a, y1 - y0); }
+        ctx.restore();
+      });
+    } else {
+      carriage(b.ai_x ?? W / 2, true, '#1fd5f5', fz['2'] && fz['2'].frozen > 0, t);
+      if (b.p1_x != null) carriage(b.p1_x, false, '#ff5b2e', fz['1'] && fz['1'].frozen > 0, t);
+    }
 
-    // predicted path + landing reticle
-    const path = b.path || [];
-    if (path.length > 1) {
+    // predicted paths + landing reticles: the AI's (cool), and player 1's AI in AI vs AI (warm)
+    [[b.path, '#1fd5f5'], [b.path1, '#ff5b2e']].forEach(([path, col]) => {
+      if (!path || path.length < 2) return;
       ctx.save();
       ctx.setLineDash([16, 12]); ctx.lineDashOffset = -t * 60;
-      ctx.strokeStyle = '#1fd5f5'; ctx.lineWidth = 4; ctx.shadowColor = '#1fd5f5'; ctx.shadowBlur = 16;
+      ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.shadowColor = col; ctx.shadowBlur = 16;
       ctx.beginPath(); path.forEach(([x, y], i) => { const [X, Y] = px(x, y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
       ctx.setLineDash([]);
       const [X, Y] = px(...path.at(-1)), r = 22 + Math.sin(t * 8) * 4;
       ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(X, Y, r, 0, 7); ctx.stroke();
       for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + t; ctx.beginPath(); ctx.moveTo(X + Math.cos(a) * (r + 4), Y + Math.sin(a) * (r + 4)); ctx.lineTo(X + Math.cos(a) * (r + 14), Y + Math.sin(a) * (r + 14)); ctx.stroke(); }
       ctx.restore();
-    }
+    });
 
     // ball + trail
     (b.trail || []).forEach(([x, y], i, a) => {
       const [X, Y] = px(x, y); ctx.fillStyle = `rgba(255,190,90,${(i / a.length) * .35})`;
       ctx.beginPath(); ctx.arc(X, Y, R * s * (0.4 + i / a.length * 0.5), 0, 7); ctx.fill();
     });
-    if (b.ball) {
+    if (b.ball && img) {                     // the real ball is in the picture: a ring around it
+      const [X, Y] = px(...b.ball);
+      ctx.save(); ctx.strokeStyle = '#ffd08a'; ctx.lineWidth = 3; ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(X, Y, R * s + 8, 0, 7); ctx.stroke();
+      ctx.restore();
+    } else if (b.ball) {
       const [X, Y] = px(...b.ball);
       ctx.save(); ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 30;
       const rg = ctx.createRadialGradient(X - 8, Y - 8, 2, X, Y, R * s);

@@ -40,6 +40,15 @@
  *    No byte for LINK_HOLD_MS (0.4 s) -> AI carriage stops and waits; for LINK_TIMEOUT_MS (1.5 s) ->
  *    Mirror AI takes over (falling tone); link back -> rising tone.
  *
+ *  SCREEN MODE (the new browser game, cheerivy_ai/main.py): the laptop runs the whole game.
+ *    "C<n>;"  enter / set the game: 0 none yet (menus), 1 vs AI, 2 two players, 3 AI vs AI
+ *    "O1;" unlock (play)   "O0;" lock (carriages stop, strikers rest, joysticks only report)
+ *    "D<n>;"  sounds: 3 / 2 / 1 countdown beep, 0 GO, 9 the buzzer-race beep
+ *    "I<p><s>;"  freeze side p (1 = player 1, 2 = AI / player 2) for s seconds (buzzer race won)
+ *    The robot reports every input:  "IN <p> L|R|U|D" joystick flicks, "IN <p> X" joystick held
+ *    down 1 s (back), "IN <p> B" button tap, "IN P" both buttons held 3 s (pause);
+ *    goals "G H" / "G A" (lasers), and "SCREEN" every second. Locked while the laptop is silent.
+ *
  *  Lines sent to the laptop:  "READY" (every second in the lobby)
  *    "START LEVEL n 1P|2P|AI"   "T <seconds left> CAM|MIR|P2|AI"
  *    "G H <human> <ai>" human scored   "G A <human> <ai>" AI scored   "END <human> <ai>"
@@ -236,6 +245,9 @@ static const Note SND_FROZEN_HUMAN[] = {{70, 10}, {0, 8}};
 static const Note SND_FROZEN_AI[] = {{35, 10}, {0, 8}};
 static const Note SND_GOAL_HUMAN[] = {{62, 8}, {49, 8}, {41, 8}, {30, 30}};
 static const Note SND_GOAL_AI[] = {{41, 12}, {49, 12}, {62, 12}, {83, 30}};
+static const Note SND_CD[] = {{45, 15}};                        /* 3, 2, 1 */
+static const Note SND_GO[] = {{30, 70}};                        /* GO: long and loud */
+static const Note SND_BUZZ[] = {{25, 8}, {0, 4}, {25, 8}, {0, 4}, {25, 25}};   /* buzzer race! */
 static const Note SND_END[] = {{62, 60}, {0, 10}, {41, 15}, {0, 5}, {41, 15}, {0, 5}, {41, 15}};
 #define PLAY(s) buzz_play((s), sizeof(s) / sizeof(Note))
 
@@ -407,6 +419,8 @@ static volatile uint8_t rx_seen;
 static volatile uint8_t rx_game = 1;    /* '1' / '2' / '3' from the laptop menu: vs AI, two players, AI vs AI */
 static volatile char rx_move1 = 'M';    /* AI vs AI: the laptop's move for player 1 ('B' 'N' 'M') */
 static volatile uint8_t rx_fire1, rx_freeze1;
+/* screen mode requests (value + 1, 0 = nothing new) */
+static volatile uint8_t scr_game_req, scr_lock_req, scr_beep_req, scr_freeze_req;
 static volatile uint8_t rx_kick, rx_end; /* 'K' kick off (in the lobby), 'E' end the match early */
 
 static void uart_init(void) {
@@ -423,7 +437,11 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
   if (df_cmd) {                         /* inside "P123;" / "V25;": collect the number */
     if (c >= '0' && c <= '9') { df_num = df_num * 10 + (c - '0'); return; }
     if (c == ';') {
-      if (df_cmd == 'P') df_play_req = df_num + 1;
+      if (df_cmd == 'C') scr_game_req = (uint8_t)df_num + 1;
+      else if (df_cmd == 'O') scr_lock_req = df_num ? 2 : 1;      /* 1 = lock, 2 = unlock */
+      else if (df_cmd == 'D') scr_beep_req = (uint8_t)df_num + 1;
+      else if (df_cmd == 'I') scr_freeze_req = (uint8_t)df_num + 1;
+      else if (df_cmd == 'P') df_play_req = df_num + 1;
       else if (df_cmd == 'A') df_adv_req = df_num + 1;
       else if (df_cmd == 'V') df_vol_req = df_num + 1;
       else if (df_cmd == 'X') { if (df_num < 255) df_raw_req = df_num + 1; }
@@ -441,6 +459,7 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
   }
   switch (c) {
     case 'P': case 'A': case 'V': case 'X': case 'H': case 'J': case 'U': case 'Q': case 'W': case 'T':
+    case 'C': case 'O': case 'D': case 'I':
       df_cmd = c; df_num = 0; return;
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
@@ -607,6 +626,7 @@ static uint8_t lobby(void) {
       next_ready = now + 1000;
       uart_puts("READY\n");             /* the laptop's "connecting..." screen waits for this */
     }
+    if (scr_game_req) return 4;         /* the new browser game takes over */
     if (rx_kick) {
       rx_kick = 0;
       if (rx_game == 3) return 3;
@@ -798,6 +818,143 @@ static void play_match(uint8_t game, uint8_t level) {
   wait_ms(1500);
 }
 
+/* ============================================================== SCREEN MODE */
+/* The laptop runs the game (menus, clock, goals, commentary); the robot moves the carriages when
+   unlocked, and reports every joystick flick and button press so the laptop can use them. */
+typedef struct {
+  uint8_t xch, ych, pin;       /* ADC channels, button pin on PORTB */
+  int8_t xs, ys;               /* current flick state: -1 / 0 / +1 */
+  uint8_t btn, back_sent;
+  uint32_t down_since;         /* joystick held down since (for "back") */
+} Stick;
+
+static void report(char p, char what) {
+  uart_puts("IN ");
+  uart_putc(p);
+  uart_putc(' ');
+  uart_putc(what);
+  uart_putc('\n');
+}
+
+static void stick_scan(Stick *k, char p, uint32_t now) {
+  uint16_t x = adc_read(k->xch), y = adc_read(k->ych);
+  int8_t xs = (x < JOY_LOW) ? -1 : (x > JOY_HIGH) ? 1 : 0;
+  int8_t ys = (y > JOY_HIGH) ? 1 : (y < JOY_LOW) ? -1 : 0;   /* +1 = pushed forward (fire) */
+  if (p == '2') xs *= P2_DIR_SIGN;
+  if (xs != k->xs && xs) report(p, xs < 0 ? 'L' : 'R');
+  if (ys != k->ys && ys) report(p, ys > 0 ? 'U' : 'D');
+  if (ys < 0) {
+    if (k->ys >= 0) { k->down_since = now; k->back_sent = 0; }
+    else if (!k->back_sent && now - k->down_since >= 1000) { k->back_sent = 1; report(p, 'X'); }
+  }
+  k->xs = xs; k->ys = ys;
+  uint8_t b = !(PINB & (1 << k->pin));
+  if (b && !k->btn) report(p, 'B');
+  k->btn = b;
+}
+
+static void screen_game(void) {
+  Stick s1 = {1, 3, PB1, 0, 0, 1, 0, 0}, s2 = {0, 2, PB0, 0, 0, 1, 0, 0};
+  uint8_t game = 0, locked = 1, link_up = 1, paused_sent = 0;
+  uint32_t human_frozen_until = 0, ai_frozen_until = 0, both_since = 0, next_hello = 0, goal_ready_at = 0;
+  motor_ai(0);
+  motor_human(0);
+  goal_flags_take();
+  for (;;) {
+    uint32_t now = millis();
+    buzz_update(now);
+    servo_update(now);
+
+    uint8_t g, l, b, f;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      g = scr_game_req; scr_game_req = 0;
+      l = scr_lock_req; scr_lock_req = 0;
+      b = scr_beep_req; scr_beep_req = 0;
+      f = scr_freeze_req; scr_freeze_req = 0;
+    }
+    if (g) { game = g - 1; locked = 1; }
+    if (l) locked = (l == 1);
+    if (b == 10) PLAY(SND_BUZZ);                               /* "D9;" */
+    else if (b == 1) PLAY(SND_GO);                             /* "D0;" */
+    else if (b) PLAY(SND_CD);                                  /* "D1;" .. "D3;" */
+    if (f) {                                                   /* "I<p><s>;" */
+      uint8_t who = (f - 1) / 10, secs = (f - 1) % 10;
+      uint32_t until = now + (uint32_t)secs * 1000;
+      if (who == 1) human_frozen_until = until; else ai_frozen_until = until;
+      PLAY(SND_SIREN);
+    }
+
+    /* the laptop must be there: without it, stop everything */
+    uint32_t last_rx;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
+    uint32_t rx_age = (last_rx > now) ? 0 : now - last_rx;
+    uint8_t link_now = rx_age < LINK_TIMEOUT_MS;
+    if (link_now != link_up) {
+      link_up = link_now;
+      PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
+    }
+    uint8_t play = !locked && link_up;
+
+    /* inputs: always reported (menus, "push forward when ready", buzzer race, pause) */
+    stick_scan(&s1, '1', now);
+    stick_scan(&s2, '2', now);
+    if (s1.btn && s2.btn) {
+      if (!both_since) both_since = now;
+      else if (!paused_sent && now - both_since >= 3000) { paused_sent = 1; uart_puts("IN P\n"); }
+    } else {
+      both_since = 0; paused_sent = 0;
+    }
+
+    /* player 1: the joystick, or the camera AI in AI vs AI */
+    int8_t d1 = 0;
+    if (play && now >= human_frozen_until) {
+      if (game == 3) {
+        d1 = (rx_move1 == 'B') ? -1 : (rx_move1 == 'N') ? 1 : 0;
+        if (rx_age >= LINK_HOLD_MS) d1 = 0;
+        if (rx_fire1) servo_fire(SERVO_HUMAN, now);
+      } else {
+        d1 = s1.xs;
+        if (s1.ys > 0 && servo_ready(SERVO_HUMAN, now)) servo_fire(SERVO_HUMAN, now);
+      }
+    }
+    rx_fire1 = rx_freeze1 = 0;
+    motor_human(d1);
+
+    /* side 2: the camera AI, or player 2's joystick */
+    int8_t d2 = 0;
+    if (play && now >= ai_frozen_until) {
+      if (game == 2) {
+        d2 = s2.xs;
+        if (s2.ys > 0) servo_fire(SERVO_AI, now);
+      } else {
+        d2 = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
+        if (rx_age >= LINK_HOLD_MS) d2 = 0;
+        if (rx_fire) servo_fire(SERVO_AI, now);
+      }
+    }
+    rx_fire = rx_freeze = 0;
+    motor_ai(d2);
+
+    /* frozen: beep until it's over */
+    if (!bz_seq) {
+      if (now < human_frozen_until) PLAY(SND_FROZEN_HUMAN);
+      else if (now < ai_frozen_until) PLAY(SND_FROZEN_AI);
+    }
+
+    /* goals: just report them; the laptop keeps the score */
+    uint8_t gf = goal_flags_take();
+    if (gf && now >= goal_ready_at) {
+      goal_ready_at = now + GOAL_LOCKOUT_MS;
+      uart_puts((gf & GOAL_AT_AI) ? "G H\n" : "G A\n");
+    }
+
+    if (now >= next_hello) {
+      next_hello = now + 1000;
+      uart_puts("SCREEN\n");
+    }
+  }
+}
+
 /* ============================================================== MAIN */
 int main(void) {
   init_all();
@@ -811,6 +968,7 @@ int main(void) {
 
   for (;;) {
     uint8_t game = lobby();             /* laptop menu (or FREEZE button) picks the game */
+    if (game == 4) screen_game();       /* the new browser game: the laptop runs everything (never returns) */
     play_match(game, level);
   }
 }

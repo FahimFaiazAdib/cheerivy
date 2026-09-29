@@ -186,7 +186,7 @@ function updateMatch() {
   setText($('tag-top'), S.names[2]); setText($('tag-bottom'), S.names[1]);
   $('team-2').classList.toggle('ai', ai);
   $('board-corner').classList.toggle('sim', !S.board);
-  $('board-corner').lastChild.textContent = S.board ? 'AI VISION' : 'AI VISION · SIMULATOR';
+  $('board-corner').lastChild.textContent = S.video ? 'AI VISION · LIVE CAMERA' : S.board ? 'AI VISION' : 'AI VISION · SIMULATOR';
 
   // clock
   const c = $('clock'), t = S.clock, live = S.running;

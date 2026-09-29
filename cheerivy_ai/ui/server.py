@@ -67,6 +67,21 @@ class Hub:
         self.cond = threading.Condition()
         self.version, self.data = 0, "{}"
         self.last = time.monotonic()
+        self.extra = {}                             # extra fields for the page (live: {"video": True})
+        self.vcond = threading.Condition()          # live camera picture (JPEG) for /video
+        self.video, self.video_seq = None, 0
+
+    def set_video(self, jpg):
+        with self.vcond:
+            self.video, self.video_seq = jpg, self.video_seq + 1
+            self.vcond.notify_all()
+
+    def feed(self, board, events=()):
+        """Live game: the camera AI's view of the table (and play events from it), once per frame."""
+        with self.cond:
+            self.board = board
+            for ev in events:
+                self.flow.play(ev)
 
     def event(self, ev):
         with self.cond:
@@ -101,7 +116,7 @@ class Hub:
                 self.watcher.touch(self.table.striker)
 
     def _publish(self):
-        snap = {**self.flow.snapshot(), "arena": ARENA}
+        snap = {**self.flow.snapshot(), "arena": ARENA, **self.extra}
         if self.board and self.flow.screen in ("prematch", "ready", "countdown", "live", "goal", "pause"):
             snap["board"] = self.board
         d = json.dumps(snap, separators=(",", ":"))
@@ -122,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/events":
             return self._events()
+        if path == "/video":
+            return self._video()
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
         full = os.path.normpath(os.path.join(WEB, rel))
         if not full.startswith(WEB) or not os.path.isfile(full):
@@ -168,8 +185,42 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
+    def _video(self):
+        """The live top-down camera picture as MJPEG (an <img> shows it; the page draws on top)."""
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        hub, seen = self.hub, -1
+        try:
+            while True:
+                with hub.vcond:
+                    hub.vcond.wait_for(lambda: hub.video_seq != seen, timeout=5)
+                    jpg, seen = hub.video, hub.video_seq
+                if jpg is None:
+                    continue
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                 + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+
     def log_message(self, *a):
         pass
+
+
+def serve(hub, port=PORT, open_browser=True, label=""):
+    """Run the web server + game clock in background threads. Returns the page's address."""
+    Handler.hub = hub
+    threading.Thread(target=hub.run, daemon=True, name="game").start()
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True, name="web").start()
+    url = f"http://localhost:{port}"
+    print(f"CHEERIVY screen{label} at {url}  (F in the browser = fullscreen)")
+    if open_browser:
+        webbrowser.open(url)
+    return url
 
 
 def main():

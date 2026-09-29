@@ -3,8 +3,10 @@
 The game screen from GAMEFLOW.md: a browser page in fullscreen, driven by the laptop.
 
 ```
-python ui/server.py            (from cheerivy_ai/)  → opens http://localhost:8316, press F for fullscreen
+python main.py                 (from cheerivy_ai/)  → the LIVE game: camera AI + robot, opens in the browser
+python ui/server.py            (from cheerivy_ai/)  → the simulator (no robot, no camera)
 ```
+Press F in the browser for fullscreen. The live game needs the robot's "screen mode" firmware (CHEERIVY.hex).
 
 Only the Python standard library is needed. The fonts are in `web/fonts/`, so it works offline.
 
@@ -38,7 +40,11 @@ The page is a fixed 1920×1080 stage, scaled to fit, so it looks the same on the
 `goals` [{scorer, score, at, golden}] · `result` {winner, score, awards[{title, who}]} · `highlight` {index, total} ·
 `lcd` [line1, line2] · `log` · `arena` {w, h, poly, rail, depth, cw, r} · `board` (from the AI, later: {ball, path, ai_x, p1_x}).
 
-## Still to connect
-- `main.py` drives the same Flow: robot joystick/button events in, `lock`/`unlock`/`beep`/`freeze`/LCD out (needs the firmware changes in GAMEFLOW.md §9).
-- The AI's live numbers go into `board`; voice and crowd go through the `say` hook (the Flow waits for `voice_busy`).
-- Real replays in the highlights reel.
+## Live (`live.py`, used by main.py)
+- Robot → game: every joystick flick / button press (`IN 1 U`, `IN 2 B`, `IN P` pause), laser goals (`G H` / `G A`).
+- Game → robot: `C<n>;` game type, `O1;`/`O0;` unlock/lock, `D3;`..`D0;` countdown / GO, `D9;` buzzer race, `I<p><s>;` freeze.
+- Camera → game: the calibrated top-down picture as MJPEG (`/video`, drawn in AI VISION) and the AI's numbers (`board`).
+- The AI plays only while the game says the ball is live. Camera goals are used until the lasers report goals.
+
+## Still to do
+- Real replays in the highlights reel. LCD 16×2 text.

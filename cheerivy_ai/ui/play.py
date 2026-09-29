@@ -131,7 +131,7 @@ class PlayWatcher:
                 toward = pvy > 1 if p == 1 else pvy < -1
                 away = vy < -1 if p == 1 else vy > 1
                 if toward and away and abs(y - LINE[p]) < HIT_ZONE_CM and t - self.last_hit > 0.25:
-                    edge = abs(x - carriage[p]) > CW / 2 - CLOSE_EDGE_CM
+                    edge = carriage.get(p) is not None and abs(x - carriage[p]) > CW / 2 - CLOSE_EDGE_CM
                     ev.append(("hit", p, {"speed": round(speed), "close": bool(edge or self.danger_on[p])}))
                     self.danger_on[p] = False
                     self.last_hit = t
@@ -149,7 +149,7 @@ class PlayWatcher:
                 ev.append(("wall",))
         land = travel(x, y, vx, vy, self.slope) if speed > REST_SPEED or self.slope != (0.0, 0.0) else None
         self.eta = land[2] if land else None
-        if land:
+        if land and carriage.get(land[0]) is not None:     # (a carriage the camera can't see: no warning)
             p, lx, eta, _ = land
             reach = abs(lx - carriage[p]) - CW / 2 - R * 0.5
             if eta < DANGER_ETA_S and reach > CARRIAGE_SPEED * eta and not self.danger_on[p]:

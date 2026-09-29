@@ -1,8 +1,9 @@
 """
 CHEERIVY — Vision AI (Layer B)
 
-    python3 main.py --sim        # virtual arena, no hardware needed
-    python3 main.py              # phone camera + HC-05
+    python3 main.py              # phone camera + HC-05: the new game opens in the browser (F = fullscreen)
+    python3 main.py --old-show   # ... with the old OpenCV show window instead
+    python3 main.py --sim        # virtual arena, no hardware needed (old show window)
     python3 main.py --cam 1      # force a camera index
     python3 main.py --no-send    # real camera, but never talk to the robot (tracking test)
 
@@ -34,6 +35,7 @@ stays paused: the camera only watches and shows the prediction.
 import argparse
 import json
 import os
+import sys
 import time
 
 import cv2
@@ -122,6 +124,8 @@ def main():
     ap.add_argument("--no-voice", action="store_true", help="live show without voice commentary")
     ap.add_argument("--robot-voice", action="store_true", help="play the commentary on the robot's speaker (DFPlayer)")
     ap.add_argument("--match-seconds", type=int, help="match length for the show's clock (default 180, sim 60)")
+    ap.add_argument("--old-show", action="store_true", help="the old OpenCV show window instead of the browser game")
+    ap.add_argument("--screen-port", type=int, default=8316, help="web port of the browser game")
     args = ap.parse_args()
 
     match_seconds = args.match_seconds or (60 if args.sim else 180)
@@ -158,8 +162,15 @@ def main():
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()
 
+    # The new browser game (cheerivy_ai/ui): it runs the match; the robot follows it in "screen mode".
+    live = None
+    if not args.no_show and not args.old_show and not args.sim:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui"))
+        from live import LiveGame
+        live = LiveGame(link, port=args.screen_port, sound=not args.no_voice)
+
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
-    if not args.no_show:
+    if not args.no_show and not live:
         show = Show(cal, voice=not args.no_voice, match_seconds=match_seconds,
                     send=link.send, robot=not args.no_send, robot_voice=args.robot_voice)
         cv2.namedWindow(show_win, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -203,7 +214,7 @@ def main():
             t_prev = now
 
             flat = cal.warp(frame)
-            flat_clean = flat.copy() if show else None
+            flat_clean = flat.copy() if (show or live) else None
             ball, carriage_x, p1_x = tracker.process(flat)
             if ball:
                 pred.update(stamp, *ball)
@@ -215,6 +226,25 @@ def main():
                 elif pred1.hist and stamp - pred1.hist[-1][0] > 0.25:
                     pred1.reset()
 
+            if live:                                # the browser game decides when the AI plays
+                if (live.mode == "aivai") != aivai:
+                    aivai = live.mode == "aivai"
+                    tracker.find_p1 = aivai
+                    pred1.reset()
+                    if not aivai:
+                        link.move1("S")
+                        link.move1(None)
+                if live.difficulty != ctrl.level:
+                    ctrl.set_difficulty(live.difficulty)
+                    ctrl1.set_difficulty(live.difficulty)
+                paused = not live.ai_plays()
+                if live.want_recalibrate and not args.sim:
+                    live.want_recalibrate = False
+                    cal = run_calibration(source) or cal
+                    tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
+                    pred1 = Predictor(mirrored(cal.arena))
+                    tracker.find_p1 = aivai
+                    continue
             cmd, fire, status = ctrl.update(pred, carriage_x, now)
             if ctrl.swap_request:
                 ctrl.swap_request = False
@@ -257,6 +287,11 @@ def main():
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
             for line in mcu_lines:
+                if live and line.startswith("G ") and goals:
+                    goals = None
+                    print("[goal] the robot's goal sensors work -> camera goal detection OFF")
+                if live and live.on_line(line):
+                    continue
                 if line.startswith(("P1SERVO", "P2SERVO")):
                     try:
                         _, r, s_ = line.split()
@@ -289,7 +324,13 @@ def main():
                     show.on_line(line)
 
             # Camera goals (until the laser sensors are wired): only during a match.
-            if goals and in_match:
+            if goals and live:
+                if live.in_play():
+                    who = goals.update(stamp, ball, pred.vy)
+                    if who:
+                        print(f"[goal] camera: {'player 1' if who == 'H' else 'AI side'} scores")
+                        live.goal(who)
+            elif goals and in_match:
                 who = goals.update(stamp, ball, pred.vy)
                 if who:
                     cam_score[who] += 1
@@ -299,6 +340,16 @@ def main():
                         show.on_line(f"G {who} {cam_score['H']} {cam_score['A']}")
             if goals and any(x.startswith("START") for x in mcu_lines):
                 goals, cam_score = GoalWatcher(), {"H": 0, "A": 0}     # new match: 0 - 0
+
+            if live:
+                r = lambda v: round(float(v), 1)
+                board = {"ball": [r(ball[0]), r(ball[1])] if ball else None,
+                         "vel": [r(pred.vx), r(pred.vy)],
+                         "path": [[r(x), r(y)] for x, y in pred.path()],
+                         "ai_x": None if carriage_x is None else r(carriage_x),
+                         "p1_x": None if (p1_x is None or not aivai) else r(p1_x),
+                         "path1": [[r(x), r(C.ARENA_H - y)] for x, y in pred1.path()] if aivai else []}
+                live.frame(stamp, flat_clean, board, pred.slope)
 
             if show:
                 show.link_state = link.mode
@@ -390,6 +441,8 @@ def main():
             elif k in (ord("1"), ord("2"), ord("3")):
                 ctrl.set_difficulty(int(chr(k)))
                 ctrl1.set_difficulty(int(chr(k)))
+            elif k == ord("b") and live:
+                print("[ai] choose AI VS AI on the game screen (home menu)")
             elif k == ord("b"):
                 aivai = not aivai
                 tracker.find_p1 = aivai
@@ -414,6 +467,8 @@ def main():
                 pred1 = Predictor(mirrored(cal.arena))
                 tracker.find_p1 = aivai
     finally:
+        if live:
+            link.send("O0;")                        # leave the robot locked
         if show:
             show.close()
         link.close()
