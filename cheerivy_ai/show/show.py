@@ -126,7 +126,11 @@ class Show:
                 self.voice.bed(amb[0])            # stadium crowd on the laptop / JBL, from now on
             print("[voice] laptop mixer: crowd + commentary (set the JBL as Windows' default speaker)")
             threading.Thread(target=self.voice.mixer.preload,
-                             args=([os.path.join(self.bank.dir, c["file"]) for c in self.bank.clips.values()],),
+                             args=([p for n in ("roar", "whistle", "ooh1", "ooh2", "applause")
+                                    for p in self.bank.sfx(n)]
+                                   + [os.path.join(self.bank.dir, c["file"]) for c in self.bank.clips.values()]
+                                   + [os.path.join(self.bank.dir, f) for e in self.bank.names.values()
+                                      for f in e["files"].values()],),
                              daemon=True).start()
         if self.bank.ok and voice:
             self.voice.status = f"voice bank ({len(self.bank.clips)} clips)"

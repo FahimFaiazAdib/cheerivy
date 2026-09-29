@@ -113,8 +113,23 @@ class _Mixer:
     def sound(self, path):
         s = self._cache.get(path)
         if s is None:
-            s = self._cache[path] = self.pg.mixer.Sound(path)
+            s = self._cache[path] = self._trimmed(self.pg.mixer.Sound(path))
         return s
+
+    def _trimmed(self, snd):
+        """Cut the silence at the start of a clip (up to 0.36 s in the recordings), so the voice
+        starts the instant it's played. Keeps 10 ms so the first sound isn't clipped."""
+        try:
+            import numpy as np
+            a = self.pg.sndarray.array(snd)
+            level = np.abs(a.reshape(len(a), -1).astype(np.int32)).max(axis=1)
+            loud = np.flatnonzero(level > 600)             # about -35 dB
+            if len(loud) == 0:
+                return snd
+            start = max(0, loud[0] - 441)                  # 10 ms before the first sound
+            return self.pg.sndarray.make_sound(np.ascontiguousarray(a[start:])) if start else snd
+        except Exception:
+            return snd
 
     def preload(self, paths):
         for p in paths:
