@@ -227,14 +227,21 @@ class Flow:
         self._step()
 
     def skip_line(self):
-        """Skip the line being said right now (just that one): the next step of the script follows at once."""
+        """SKIP: cut the talk and get on with the game (kick-off, restart, results). The line being said
+        stops, and so does the rest of the script, except the buzzer rule: that one is always said."""
         if self.now < self.no_skip_until:
             return
         self._hook("hush")
         self.caption_until = 0.0
         self.quiet_from = self.now
         if self.script is not None:
-            self.step_end = self.now
+            kept = []
+            for step in self.script:
+                if step[1] and step[1].startswith(NO_SKIP):
+                    kept.append(step)
+                elif len(step) > 3:
+                    step[3]()                       # a skipped step's own action still happens
+            self.script, self.step_end = kept, self.now
 
     def _stop_script(self):
         self.script, self.then = None, None
