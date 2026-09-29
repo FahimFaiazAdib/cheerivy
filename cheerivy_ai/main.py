@@ -12,6 +12,7 @@ CHEERIVY — Vision AI (Layer B)
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
        player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger
+       m  robot speaker test (DFPlayer): crowd + a new commentary clip every 5 s; m again = stop
                                              /  test strike
 Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
        RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
@@ -25,6 +26,7 @@ The AI unpauses by itself at kick-off and pauses again at full time. In two-play
 stays paused: the camera only watches and shows the prediction.
 """
 import argparse
+import json
 import os
 import time
 
@@ -134,6 +136,16 @@ def main():
 
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
     p1_servo, p1_asked = None, False      # player 1's servo angles, as reported by the robot
+    sound_test, sound_next_t, sound_i = False, 0.0, 0
+    sd_tracks = {}
+    try:
+        with open(os.path.join("show", "voice_bank", "sd_tracks.json")) as f:
+            sd_tracks = json.load(f)
+    except (OSError, ValueError):
+        pass
+    crowd_n = sd_tracks.get("crowd/ambience.wav", 201)
+    test_clips = sorted(n for rel, n in sd_tracks.items() if not rel.startswith(("crowd/", "names/"))) \
+        or list(range(1, 201))
     cam_score = {"H": 0, "A": 0}
     in_match = False
     try:
@@ -164,6 +176,12 @@ def main():
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"
             link.move(cmd)
+            if sound_test and now >= sound_next_t:
+                n = test_clips[sound_i % len(test_clips)]
+                sound_i += 1
+                link.send(f"A{n};")
+                print(f"[sound] playing /ADVERT/{n:04d}.mp3 over the crowd")
+                sound_next_t = now + 5.0
             if not p1_asked and link.ser and not args.sim:
                 p1_asked = True
                 link.send("U0;")                        # the robot replies "P1SERVO <rest> <strike>"
@@ -234,6 +252,17 @@ def main():
 
             k = cv2.waitKey(1) & 0xFF
             if k == 255:
+                continue
+            if k == ord("m") and not (show and show.phase == "NAMES"):
+                sound_test = not sound_test
+                if sound_test:
+                    link.send("V26;")
+                    link.send(f"P{crowd_n};")
+                    sound_next_t = time.time() + 2.0
+                    print(f"[sound] test ON: crowd = /MP3/{crowd_n:04d}.mp3, then a clip every 5 s (m = stop)")
+                else:
+                    link.send("P0;")
+                    print("[sound] test OFF")
                 continue
             if chr(k) in "[]-=/" and not (show and show.phase == "NAMES"):
                 p1 = p1_servo or {}
