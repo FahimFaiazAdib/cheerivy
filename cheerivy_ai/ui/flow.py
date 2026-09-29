@@ -79,6 +79,8 @@ SETTINGS = [
     ("Camera & AI", "debug", "AI debug overlay", (False, True), False),
     ("Debug", "motor_test", "Motor & striker test", None, None),
 ]
+TALK_SCREENS = ("prematch", "goal", "fulltime", "highlights")   # a joystick push / button skips the talk
+SKIP_GUARD_S = 1.0
 NO_SKIP = ("rules_buzz", "buzz_win")      # commentary the SKIP key can't cut: the buzzer rule, freezes
 DEBUG_MOVE_S = 0.3        # debug: one key press drives a carriage this long
 SPEC = {s[1]: s for s in SETTINGS}
@@ -853,6 +855,14 @@ class Flow:
             elif kind == "btn":
                 self._choose(m["items"][m["cursor"]], a[0])
             return
+        if self.screen in TALK_SCREENS and (kind == "btn" or (kind == "dir" and a[1] == "U")):
+            # SKIP from the joysticks: the button or a push forward (not in the first second of a
+            # screen, so a strike that was still going when the goal went in doesn't skip the call)
+            if self.now - self.since >= SKIP_GUARD_S:
+                self.skip_line()
+            return
+        if kind == "btn" and self.screen == "ready":
+            return self.skip_line()             # the button just hushes the instructions here
         if kind == "dir" and a[1] == "U":
             # "I'm ready" = push the joystick FORWARD (the button is only for the buzzer, so it never
             # means two things): the placing player starts the 3-2-1
