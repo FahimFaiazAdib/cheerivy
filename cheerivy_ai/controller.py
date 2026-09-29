@@ -44,6 +44,7 @@ class Controller:
     def update(self, predictor, carriage_x, now=None):
         """Returns (move_cmd, fire: bool, status_text)."""
         now = now or time.time()
+        near = False
         pos = predictor.position
         # A slow ball right in front: go and hit it, even if the tilt says it may still roll in by
         # itself (it can stop short, and then waiting for it means waiting for ever).
@@ -68,7 +69,9 @@ class Controller:
                 desired = self.centre if pos is None else 0.5 * pos[0] + 0.5 * self.centre
                 status = "TRACKING" if pos else "NO BALL"
 
-        desired = min(max(desired, self.rail_lo + C.RAIL_MARGIN_CM), self.rail_hi - C.RAIL_MARGIN_CM)
+        # a ball at its feet in a corner: go right up to the rail end for it
+        edge = 0.3 if (hit is None and near) else C.RAIL_MARGIN_CM
+        desired = min(max(desired, self.rail_lo + edge), self.rail_hi - edge)
 
         # Reaction delay: the new target only takes effect after `delay` seconds.
         if self.delay and abs(desired - self.target) > 2:
@@ -152,7 +155,11 @@ class Controller:
                 and abs(x_hit - carriage_x) <= C.FIRE_REACH_CM
                 and now - self.last_fire > C.FIRE_COOLDOWN_S)
         if x_hit is None and near and now - self.last_fire > C.FIRE_COOLDOWN_S:
-            fire = abs(pos[0] - carriage_x) <= C.FIRE_REACH_CM - 1.0   # lined up: hit it
+            # lined up: hit it. At a rail end it can't get closer: the plate's edge still reaches a
+            # ball in the corner
+            dx = abs(pos[0] - carriage_x)
+            at_end = carriage_x >= self.rail_hi - 0.8 or carriage_x <= self.rail_lo + 0.8
+            fire = dx <= C.FIRE_REACH_CM - 1.0 or (at_end and dx <= C.FIRE_REACH_CM + C.BALL_RADIUS - 0.5)
         if fire:
             self.last_fire = now
             status = "FIRE!"
