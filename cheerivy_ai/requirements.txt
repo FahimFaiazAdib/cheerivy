@@ -5,3 +5,4 @@ pyserial>=3.5
 Pillow>=10.1
 # Optional: Kokoro voice ("George") runs in its own Python 3.12 via `uv` (see show/voice.py).
 # Without it the show uses the built-in Mac / Windows voice.
+pygame>=2.5

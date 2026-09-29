@@ -120,6 +120,14 @@ class Show:
             amb = self.bank.sfx("ambience")
             if amb:
                 self.voice.bed_path = amb[0]      # the crowd murmur starts with the first line
+        elif self.voice.mixer and self.bank.ok:
+            amb = self.bank.sfx("ambience")
+            if amb:
+                self.voice.bed(amb[0])            # stadium crowd on the laptop / JBL, from now on
+            print("[voice] laptop mixer: crowd + commentary (set the JBL as Windows' default speaker)")
+            threading.Thread(target=self.voice.mixer.preload,
+                             args=([os.path.join(self.bank.dir, c["file"]) for c in self.bank.clips.values()],),
+                             daemon=True).start()
         if self.bank.ok and voice:
             self.voice.status = f"voice bank ({len(self.bank.clips)} clips)"
             print(f"[voice] using the recorded voice bank: {len(self.bank.clips)} clips")
@@ -378,6 +386,9 @@ class Show:
         self.pip = None
         self.bursts.append(Burst(W / 2, H * 0.42, G.HUMAN if who == "H" else G.AI))
         _sound("Hero" if who == "H" else "Sosumi")
+        roar = self.bank.sfx("roar")
+        if roar:
+            self.voice.fx(roar[0])                    # the crowd explodes (laptop mixer)
         if self.bank.ok:
             history = [x["score"] for x in self.goals[:-1]]
             payoff, tail = self.bank.goal(self.game, who, (self.score["H"], self.score["A"]), self.name_of(who),

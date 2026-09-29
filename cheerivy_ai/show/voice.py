@@ -93,6 +93,37 @@ def _join(paths):
         return None
 
 
+class _Mixer:
+    """pygame's audio mixer: several sounds at once (crowd loop + commentary + goal roar), clips
+    preloaded so they start at once, no cut-off endings. Plays on the system's default output
+    (laptop speakers, or a JBL on aux / Bluetooth once it's the default device)."""
+    BED_VOL, BED_DUCK = 0.45, 0.18   # crowd loudness normally / while the commentator talks
+    FX_VOL = 0.9
+
+    def __init__(self):
+        os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+        import pygame
+        self.pg = pygame
+        pygame.mixer.pre_init(44100, -16, 2, 512)    # small buffer = low delay
+        pygame.mixer.init()
+        pygame.mixer.set_num_channels(8)
+        self.bed_ch, self.voice_ch, self.fx_ch = (pygame.mixer.Channel(i) for i in range(3))
+        self._cache = {}
+
+    def sound(self, path):
+        s = self._cache.get(path)
+        if s is None:
+            s = self._cache[path] = self.pg.mixer.Sound(path)
+        return s
+
+    def preload(self, paths):
+        for p in paths:
+            try:
+                self.sound(p)
+            except Exception:
+                pass
+
+
 def _find_uv():
     for p in (shutil.which("uv"), os.path.expanduser("~/.local/bin/uv"), "/opt/homebrew/bin/uv"):
         if p and os.path.exists(p):
@@ -109,6 +140,13 @@ class Voice:
         self.tracks = tracks or {}
         self._robot_stop = threading.Event()
         self._main_start = self._main_end = 0.0   # the DFPlayer's main (crowd) track: started / runs out
+        self.mixer = None             # pygame mixer (laptop / JBL): crowd + commentary together
+        if enabled and not robot_send:
+            try:
+                self.mixer = _Mixer()
+            except Exception as e:    # no pygame, or no audio device: the old one-sound-at-a-time player
+                print(f"[voice] pygame mixer not available ({e}) -> no crowd sound on the laptop "
+                      f"(pip install pygame)")
         self.bed_path = None          # the crowd loop (set by the show)
         self.speed = speed
         self.ready = False            # Kokoro worker loaded
@@ -267,6 +305,10 @@ class Voice:
         if self.robot_send and self.busy:
             self._robot_stop.set()
             self.robot_send("A0;")                    # stop the clip; the crowd carries on
+        if self.mixer:
+            self.mixer.voice_ch.stop()
+            self._robot_stop.set()
+            return
         if IS_WIN:
             self._win_stop.set()
             try:
@@ -280,6 +322,23 @@ class Voice:
 
     def _play(self, path):
         """Play one file and return when it's done (or cut short by hush())."""
+        snd = None
+        if self.mixer:
+            try:
+                snd = self.mixer.sound(path)
+            except Exception:                          # a format pygame can't read: old player
+                snd = None
+        if snd is not None:
+            m = self.mixer
+            self._robot_stop.clear()
+            m.voice_ch.play(snd)
+            m.bed_ch.set_volume(m.BED_DUCK)            # the crowd steps back while he talks
+            while m.voice_ch.get_busy() and not self._robot_stop.wait(0.01):
+                pass
+            m.bed_ch.set_volume(m.BED_VOL)
+            if self.bed_path and not m.bed_ch.get_busy():
+                self.bed(self.bed_path)                # e.g. the applause ended: murmur again
+            return
         if IS_WIN:
             self._win_stop.clear()
             winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
@@ -291,6 +350,16 @@ class Voice:
     def bed(self, path, loop=True):
         """Start a crowd track as the DFPlayer's main track (the commentary plays over it).
         loop=True: this is the murmur that keeps being restarted; False: play once (applause)."""
+        if self.mixer:
+            if loop:
+                self.bed_path = path
+            try:
+                m = self.mixer
+                m.bed_ch.play(m.sound(path), loops=-1 if loop else 0, fade_ms=800)
+                m.bed_ch.set_volume(m.BED_VOL)
+            except Exception:
+                pass
+            return
         if not self.robot_send or path not in self.tracks:
             return
         if loop:
@@ -298,7 +367,19 @@ class Voice:
         self.robot_send(f"P{self.tracks[path]};")
         self._main_start, self._main_end = time.time(), time.time() + _wav_seconds(path)
 
+    def fx(self, path):
+        """A sound effect on top of everything, straight away (the goal roar). Laptop mixer only:
+        on the robot the roar is already mixed into the goal calls."""
+        if self.mixer and path:
+            try:
+                self.mixer.fx_ch.play(self.mixer.sound(path))
+                self.mixer.fx_ch.set_volume(self.mixer.FX_VOL)
+            except Exception:
+                pass
+
     def stop_all(self):
+        if self.mixer:
+            self.pg_stop()
         if self.robot_send:
             self.robot_send("P0;")
             self._main_end = 0.0
@@ -341,8 +422,10 @@ class Voice:
                         time.sleep(LINE_GAP_S)
                     self.busy, self.quiet_since = False, time.time()
                     continue
-                joined = _join(list(text)) if len(text) > 1 else text[0]
-                for path in ([joined] if joined else text):
+                joined = None if self.mixer else (_join(list(text)) if len(text) > 1 else text[0])
+                for i, path in enumerate([joined] if joined else text):
+                    if self.mixer and i:
+                        time.sleep(CLIP_GAP_S)
                     if gen != self._gen or self._stop:    # hush() arrived: drop the rest
                         break
                     try:
@@ -360,6 +443,12 @@ class Voice:
                 self._play(path)
             except (OSError, RuntimeError):
                 pass
+
+    def pg_stop(self):
+        try:
+            self.mixer.pg.mixer.stop()
+        except Exception:
+            pass
 
     def close(self):
         self._stop = True
