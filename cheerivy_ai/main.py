@@ -399,8 +399,11 @@ def main():
                 if not aivai:
                     link.move1("S")
                     link.move1(None)
-                print(f"[ai] AI vs AI {'ON: the camera AI drives player 1 too (blue tape; left-click it in the '
-                                       'bottom half to lock its colour). Start a match from the show.' if aivai else 'OFF'}")
+                if aivai:
+                    print("[ai] AI vs AI ON: the camera AI drives player 1 too (blue tape; left-click it in the "
+                          "bottom half to lock its colour). Start a match from the show.")
+                else:
+                    print("[ai] AI vs AI OFF")
             elif k == ord("f"):
                 link.send("F")
             elif k == ord("z"):
