@@ -25,3 +25,8 @@ clean:
 	rm -f main.elf main.hex
 
 .PHONY: flash clean camera-only
+
+servo-test: servo_test.c
+	avr-gcc $(CFLAGS) -o servo_test.elf servo_test.c
+	avr-objcopy -O ihex -R .eeprom servo_test.elf SERVO_TEST.hex
+	avr-size --mcu=$(MCU) -C servo_test.elf
