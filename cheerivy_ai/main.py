@@ -301,6 +301,8 @@ def main():
                 ctrl.swap_request = False
                 link.swap = not link.swap
                 print(f"[ai] carriage moved the wrong way twice -> L/R swap {'ON' if link.swap else 'OFF'} automatically")
+                if live:
+                    live.sync_swaps()
             if paused:
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"
@@ -320,7 +322,9 @@ def main():
                     ctrl1.swap_request = False
                     link.swap1 = not link.swap1
                     print(f"[ai] player 1's carriage moved the wrong way -> its L/R swap "
-                          f"{'ON' if link.swap1 else 'OFF'} (set SWAP_LR_P1 = {link.swap1} in config.py to keep it)")
+                          f"{'ON' if link.swap1 else 'OFF'} (saved in Settings)")
+                    if live:
+                        live.sync_swaps()
                 if paused:
                     cmd1, fire1 = "S", False
                 link.move1(cmd1)
@@ -504,11 +508,14 @@ def main():
             elif k == ord("y"):
                 link.swap1 = not link.swap1
                 link.current1 = None                # resend player 1's move the new way round
-                print(f"[link] player 1 L/R swap {'ON' if link.swap1 else 'OFF'} "
-                      f"(set SWAP_LR_P1 = {link.swap1} in config.py to keep it)")
+                print(f"[link] player 1 L/R swap {'ON' if link.swap1 else 'OFF'}")
+                if live:
+                    live.sync_swaps()
             elif k == ord("x"):
                 link.swap = not link.swap
-                print(f"[link] L/R swap {'ON' if link.swap else 'OFF'} (set SWAP_LR = {link.swap} in config.py to keep it)")
+                print(f"[link] L/R swap {'ON' if link.swap else 'OFF'}")
+                if live:
+                    live.sync_swaps()
             elif k in (ord("1"), ord("2"), ord("3")):
                 ctrl.set_difficulty(int(chr(k)))
                 ctrl1.set_difficulty(int(chr(k)))

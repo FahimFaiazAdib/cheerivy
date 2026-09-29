@@ -61,6 +61,7 @@ class LiveGame:
         self.manual = {1: ("S", 0.0), 2: ("S", 0.0)}   # debug keyboard moves: (L/R/S, until)
         self._last_video = 0.0
         self.flow.hooks.update(robot=self._robot, setting=self._setting, action=self._action)
+        link.swap, link.swap1 = bool(st["swap_lr"]), bool(st["swap_lr_p1"])   # the saved L/R swaps
         if self.sound and self.sound.ok:
             self.flow.hooks.update(say=self.sound.say, voice_busy=self.sound.voice_busy,
                                    hush=self.sound.hush, crowd=self.sound.crowd)
@@ -121,6 +122,14 @@ class LiveGame:
         if camera and self.in_play():               # the lasers beep by themselves; for the camera, ask
             self.link.send("D7;" if scorer == 1 else "D8;")
         self.hub.event(("goal", scorer, own))
+
+    def sync_swaps(self):
+        """main.py changed a L/R swap (by itself, or keys x / y): keep Settings and the saved file in step."""
+        with self.hub.cond:
+            s = self.flow.settings
+            if (s["swap_lr"], s["swap_lr_p1"]) != (self.link.swap, self.link.swap1):
+                s["swap_lr"], s["swap_lr_p1"] = self.link.swap, self.link.swap1
+                self.flow._save()
 
     def manual_cmd(self, p, now):
         """Debug: the keyboard's move for carriage p right now ('L' 'R' 'S')."""
