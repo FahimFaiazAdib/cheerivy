@@ -11,6 +11,8 @@ CHEERIVY — Vision AI (Layer B)
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
+       player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  strike angle -/+ 1
+                                             /  test strike
 Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
        RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
 
@@ -131,6 +133,7 @@ def main():
         show_phase = show.phase
 
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
+    p1_servo, p1_asked = None, False      # player 1's servo angles, as reported by the robot
     cam_score = {"H": 0, "A": 0}
     in_match = False
     try:
@@ -161,10 +164,21 @@ def main():
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"
             link.move(cmd)
+            if not p1_asked and link.ser and not args.sim:
+                p1_asked = True
+                link.send("U0;")                        # the robot replies "P1SERVO <rest> <strike>"
             if fire:
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
             for line in mcu_lines:
+                if line.startswith("P1SERVO"):
+                    try:
+                        _, r, s_ = line.split()
+                        p1_servo = {"rest": int(r), "strike": int(s_)}
+                        print(f"[servo] player 1: rest {r}°, strike {s_}°, swing {abs(int(r) - int(s_))}° (saved on the robot)")
+                    except ValueError:
+                        pass
+                    continue
                 if line != "READY" and not (args.sim and line.startswith("G ")):
                     print("[mcu]", line)
                 if line.startswith("G ") and goals and not args.sim:
@@ -220,6 +234,19 @@ def main():
 
             k = cv2.waitKey(1) & 0xFF
             if k == 255:
+                continue
+            if chr(k) in "[]-=/" and not (show and show.phase == "NAMES"):
+                p1 = p1_servo or {}
+                if chr(k) == "/":
+                    link.send("U1;")
+                elif "rest" in p1:
+                    if chr(k) in "[]":
+                        link.send(f"H{max(0, min(180, p1['rest'] + (1 if k == ord(']') else -1)))};")
+                    else:
+                        link.send(f"J{max(0, min(180, p1['strike'] + (1 if k == ord('=') else -1)))};")
+                else:
+                    link.send("U0;")                    # ask the robot for the current angles first
+                    print("[servo] asking the robot for player 1's angles, press again")
                 continue
             if show and show.on_key(k):
                 continue
