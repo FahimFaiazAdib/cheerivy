@@ -103,6 +103,7 @@ class Show:
         self.ready_at = 0.0             # last "READY" from the robot's lobby
         self.link_state = ""            # set by main.py: "HC-05" / "RECONNECTING" / "SIM"
         self.game = 1                   # 1 = vs AI, 2 = two players
+        self.aivai = False              # set by main.py (key b): the camera AI plays player 1's side too
         self.names = {"H": "", "A": ""}
         self.field = "H"
         self.phase = CONNECT if robot else MENU
@@ -226,7 +227,7 @@ class Show:
     def request_kickoff(self):
         """Tell the robot which game to play and start it. Its "START" line then kicks off here."""
         if self.robot_listening():
-            self.send(str(self.game))
+            self.send("3" if self.aivai else str(self.game))   # 3 = AI vs AI (key b in main.py)
             self.send("K")
 
     # ================================================================ inputs (main thread)

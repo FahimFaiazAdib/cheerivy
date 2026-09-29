@@ -11,13 +11,16 @@ CHEERIVY — Vision AI (Layer B)
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
+       b  AI vs AI on/off: the camera AI drives PLAYER 1's carriage too (blue tape on it);
+          the next match started from the show is played AI vs AI
        servo tuning (saved on the robot):    p  switch player 1 <-> player 2
              [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger    /  test strike
        m  robot speaker test (DFPlayer): a commentary clip from /MP3 every 5 s; m again = stop
        n  DFPlayer "next track" (same as touching its IO2 pin to GND)
        , / .  robot speaker volume down / up (0..30)
                                              /  test strike
-Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
+Mouse, in the right-hand (top-down) view: LEFT-click a carriage tape to lock its colour
+       (top half = AI carriage, bottom half = player 1's carriage in AI vs AI),
        RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
 
 Live show window (see show/TARGET.md):
@@ -41,6 +44,7 @@ from goals import GoalWatcher
 from calibrate import Calibration, run_calibration
 from camera import Camera, SimArena
 from controller import Controller
+from arena import Arena
 from link import Link
 from predictor import Predictor
 from tracker import Tracker
@@ -53,7 +57,12 @@ def to_px(p):
     return int(p[0] * C.PX_PER_CM), int(p[1] * C.PX_PER_CM)
 
 
-def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paused):
+def mirrored(arena):
+    """The board seen from player 1's end: the same AI then plays player 1's side (AI vs AI)."""
+    return Arena([(x, C.ARENA_H - y) for x, y in arena.poly])
+
+
+def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paused, p1=None):
     s = C.PX_PER_CM
     h, w = flat.shape[:2]
     cv2.polylines(flat, [np.int32([to_px(p) for p in arena.poly])], True, (255, 150, 0), 1)
@@ -75,12 +84,28 @@ def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paus
         half = int(C.CARRIAGE_W / 2 * s)
         cv2.rectangle(flat, (cx - half, 2), (cx + half, y_line), (0, 0, 255), 2)
 
+    if p1:                                  # AI vs AI: player 1's side, drawn the right way up
+        p1_x, pred1, ctrl1 = p1
+        y1 = int((C.ARENA_H - C.AI_LINE_Y) * s)
+        path1 = pred1.path()
+        if path1:
+            cv2.polylines(flat, [np.int32([to_px((x, C.ARENA_H - y)) for x, y in path1])], False, (255, 120, 0), 2)
+            cv2.circle(flat, to_px((path1[-1][0], C.ARENA_H - path1[-1][1])), 8, (255, 120, 0), -1)
+        cv2.line(flat, (int(ctrl1.target * s), y1 - 8), (int(ctrl1.target * s), h), (255, 120, 0), 2)
+        if p1_x is not None:
+            half = int(C.CARRIAGE_W / 2 * s)
+            cv2.rectangle(flat, (int(p1_x * s) - half, y1), (int(p1_x * s) + half, h - 2), (255, 0, 0), 2)
+
     speed = (pred.vx ** 2 + pred.vy ** 2) ** 0.5
     lines = [status,
              f"CMD {cmd}  | {link.mode}{f' echo {link.echo_count}' if link.ser else ''}{' L/R SWAPPED' if link.swap else ''} | level {ctrl.level} | {fps:4.1f} fps",
              f"ball {'--' if not ball else f'{ball[0]:4.1f},{ball[1]:4.1f}'} cm  v={speed:4.0f} cm/s",
              f"carriage {'--' if carriage_x is None else f'{carriage_x:4.1f}'} cm  target {ctrl.target:4.1f}",
              f"motor {ctrl.motor_speed:3.0f} cm/s  rail {ctrl.rail_lo:4.1f}..{ctrl.rail_hi:4.1f} cm"]
+    if p1:
+        p1_x, pred1, ctrl1 = p1
+        lines.append(f"AI vs AI  P1 carriage {'--' if p1_x is None else f'{p1_x:4.1f}'} cm  target {ctrl1.target:4.1f}"
+                     f"  motor {ctrl1.motor_speed:3.0f}{'  L/R SWAPPED' if link.swap1 else ''}")
     panel = np.zeros((22 * len(lines) + 10, w, 3), np.uint8)
     for i, t in enumerate(lines):
         cv2.putText(panel, t, (8, 22 * (i + 1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -111,6 +136,10 @@ def main():
         link = Link(port=args.port, enabled=not args.no_send)
 
     tracker, pred, ctrl = Tracker(cal.arena), Predictor(cal.arena), Controller()
+    # AI vs AI: a second AI for player 1's carriage. It sees the board mirrored (its own end on top),
+    # so it's exactly the same predictor + controller as the AI side's.
+    aivai = False
+    pred1, ctrl1 = Predictor(mirrored(cal.arena)), Controller()
     paused = not args.sim  # real robot: nothing moves until you press space
     manual, manual_until = "S", 0.0
     win = "CHEERIVY vision AI"
@@ -175,11 +204,16 @@ def main():
 
             flat = cal.warp(frame)
             flat_clean = flat.copy() if show else None
-            ball, carriage_x = tracker.process(flat)
+            ball, carriage_x, p1_x = tracker.process(flat)
             if ball:
                 pred.update(stamp, *ball)
             elif pred.hist and stamp - pred.hist[-1][0] > 0.25:
                 pred.reset()  # lost the ball for a while — forget old motion
+            if aivai:
+                if ball:
+                    pred1.update(stamp, ball[0], C.ARENA_H - ball[1])
+                elif pred1.hist and stamp - pred1.hist[-1][0] > 0.25:
+                    pred1.reset()
 
             cmd, fire, status = ctrl.update(pred, carriage_x, now)
             if ctrl.swap_request:
@@ -190,6 +224,18 @@ def main():
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"
             link.move(cmd)
+            if aivai:                               # player 1's carriage, driven by the second AI
+                cmd1, fire1, status1 = ctrl1.update(pred1, p1_x, now)
+                if ctrl1.swap_request:
+                    ctrl1.swap_request = False
+                    link.swap1 = not link.swap1
+                    print(f"[ai] player 1's carriage moved the wrong way -> its L/R swap "
+                          f"{'ON' if link.swap1 else 'OFF'} (set SWAP_LR_P1 = {link.swap1} in config.py to keep it)")
+                if paused:
+                    cmd1, fire1 = "S", False
+                link.move1(cmd1)
+                if fire1:
+                    link.send("G")
             if sound_test and now >= sound_next_t:
                 n = test_clips[sound_i % len(test_clips)]
                 sound_i += 1
@@ -263,7 +309,7 @@ def main():
                 # the AI plays during a match and rests before / after it
                 if show.phase != show_phase:
                     if show.phase == "LIVE":
-                        paused = show.game == 2     # two players: the AI only watches
+                        paused = show.game == 2 and not aivai   # two players: the AI only watches
                     elif show_phase == "LIVE":
                         paused = True
                     show_phase = show.phase
@@ -273,7 +319,8 @@ def main():
                     show_seq = seq
 
             flat_holder["img"] = flat.copy()
-            view = draw(flat, cal.arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paused)
+            view = draw(flat, cal.arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paused,
+                        (p1_x, pred1, ctrl1) if aivai else None)
             cam_small = cv2.resize(frame, (int(frame.shape[1] * view.shape[0] / frame.shape[0]), view.shape[0]))
             flat_holder["offset_x"] = cam_small.shape[1]
             cv2.imshow(win, np.hstack([cam_small, view]))
@@ -342,6 +389,18 @@ def main():
                 print(f"[link] L/R swap {'ON' if link.swap else 'OFF'} (set SWAP_LR = {link.swap} in config.py to keep it)")
             elif k in (ord("1"), ord("2"), ord("3")):
                 ctrl.set_difficulty(int(chr(k)))
+                ctrl1.set_difficulty(int(chr(k)))
+            elif k == ord("b"):
+                aivai = not aivai
+                tracker.find_p1 = aivai
+                pred1.reset()
+                if show:
+                    show.aivai = aivai
+                if not aivai:
+                    link.move1("S")
+                    link.move1(None)
+                print(f"[ai] AI vs AI {'ON: the camera AI drives player 1 too (blue tape; left-click it in the '
+                                       'bottom half to lock its colour). Start a match from the show.' if aivai else 'OFF'}")
             elif k == ord("f"):
                 link.send("F")
             elif k == ord("z"):
@@ -349,6 +408,8 @@ def main():
             elif k == ord("c") and not args.sim:
                 cal = run_calibration(source) or cal
                 tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
+                pred1 = Predictor(mirrored(cal.arena))
+                tracker.find_p1 = aivai
     finally:
         if show:
             show.close()

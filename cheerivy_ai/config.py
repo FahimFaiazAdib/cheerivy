@@ -17,9 +17,9 @@ CARRIAGE_GAP = 38.0     # measured: AI carriage front face -> P1 carriage front 
 CARRIAGE_DEPTH = 4.0    # measured: baseline wall -> carriage front face
 CARRIAGE_W = 10.0       # measured: carriage width (left-right)
 ARENA_H = CARRIAGE_GAP + 2 * CARRIAGE_DEPTH   # baseline to baseline
-CHAMFER_DX = 9.0        # measured: diagonal corner wall, sideways
-CHAMFER_DY = 10.0       # measured: diagonal corner wall, along the length
-END_STRAIGHT = 2.5      # measured: short straight wall between baseline and the diagonal
+CHAMFER_DX = 0.0        # the board is a plain rectangle now (was 9.0 on the old octagon board)
+CHAMFER_DY = 0.0        # (was 10.0)
+END_STRAIGHT = 0.0      # (was 2.5)
 BALL_RADIUS = 2.0       # measured: ball diameter 4 cm
 
 X0 = CHAMFER_DX + 3.0   # left margin in the top-down image so the chamfers fit
@@ -39,6 +39,7 @@ CAMERA_W, CAMERA_H = 1280, 720
 # Fine-tune live in the top-down view: LEFT-click the carriage tape, RIGHT-click the ball.
 BALL_COLOR = "orange"       # "orange", "black", or any name in COLORS
 CARRIAGE_COLOR = "green"    # "green", "blue" or "red"
+P1_CARRIAGE_COLOR = "blue"  # AI vs AI: the tape on PLAYER 1's carriage (the camera AI drives it too)
 # HSV ranges (OpenCV: hue 0-180, saturation and value 0-255). "black" = dark pixels instead.
 COLORS = {
     "orange": [((5, 110, 110), (25, 255, 255))],
@@ -68,6 +69,17 @@ VEL_MIN_POINTS = 3
 MIN_APPROACH_SPEED = 8.0   # cm/s; slower than this = not an "incoming" shot
 SYSTEM_LATENCY_S = 0.07    # camera + processing + Bluetooth (HC-05)
 
+# Board tilt: a thin sheet under the board makes it slope, so a slow ball slows down, stops and
+# rolls back. Acceleration along the length in each half, cm/s² (+ = toward the P1 end, - = toward
+# the AI end). These are only the starting values: the AI learns the real slope from the ball.
+SLOPE_A_AI_HALF = 0.0
+SLOPE_A_P1_HALF = 0.0
+SLOPE_LEARN = True
+SLOPE_MAX = 60.0           # ignore learned values beyond this (tracking glitches)
+SLOPE_LEARN_S = 0.6        # a roll this long inside one half counts fully; shorter ones count less
+SLOPE_LEARN_RATE = 0.15    # how fast a new measurement moves the learned value
+SIM_SLOPE = (-6.0, 6.0)    # simulator only: (AI half, P1 half); sheet under the middle = both roll home
+
 # ---------------------------------------------------------------- control
 DEADBAND_CM = 1.5       # stop when |target - carriage| below this
 HYSTERESIS_CM = 1.0     # extra margin before starting to move again
@@ -86,6 +98,7 @@ HEARTBEAT_S = 0.1       # resend current command this often (firmware falls back
 ROBOT_VOLUME = 14      # robot speaker (DFPlayer) volume 0..30; the PAM8610 amp has no knob, so set it here
 CAMERA_GOALS = True     # count goals from the camera (turns itself off when the laser sensors report one)
 SWAP_LR = True          # True if the carriage drives the WRONG way (press 'x' live to test)
+SWAP_LR_P1 = False      # the same for PLAYER 1's carriage in AI vs AI (fixes itself if it drives the wrong way)
 
 # Difficulty presets: (extra reaction delay s, target error cm, fire probability)
 DIFFICULTY = {

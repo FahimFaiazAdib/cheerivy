@@ -49,7 +49,9 @@ class Link:
         self.port_hint = port
         self.running = True
         self.swap = C.SWAP_LR   # motor wired the other way round -> swap L and R
+        self.swap1 = C.SWAP_LR_P1   # the same for player 1's carriage (AI vs AI)
         self.current = None
+        self.current1 = None    # AI vs AI: player 1's move ('B' 'N' 'M' on the wire)
         self.last_send = 0.0
         self.sent_count = 0
         self.echo_count = 0     # lowercase echoes from the MCU = proof the link works both ways
@@ -95,7 +97,7 @@ class Link:
             time.sleep(C.HEARTBEAT_S / 2)
             cmd = self.current
             if cmd is not None and self.ser and time.time() - self.last_send > C.HEARTBEAT_S:
-                self._write(self._wire(cmd))
+                self._write(self._wire(cmd) + (self._wire1(self.current1) if self.current1 else ""))
                 self.last_send = time.time()
 
     def _drop(self, why):
@@ -130,6 +132,20 @@ class Link:
     def _wire(self, cmd):
         return {"L": "R", "R": "L"}.get(cmd, cmd) if self.swap else cmd
 
+    def _wire1(self, cmd):
+        if self.swap1:
+            cmd = {"L": "R", "R": "L"}.get(cmd, cmd)
+        return {"L": "B", "R": "N", "S": "M"}[cmd]
+
+    def move1(self, cmd):
+        """AI vs AI: move player 1's carriage ('L' 'R' 'S', like move()). None = not in AI vs AI."""
+        if cmd is None:
+            self.current1 = None
+            return
+        if cmd != self.current1:
+            self._write(self._wire1(cmd))
+            self.current1 = cmd
+
     def move(self, cmd):
         now = time.time()
         if cmd != self.current or now - self.last_send > C.HEARTBEAT_S:
@@ -137,7 +153,7 @@ class Link:
             self.current, self.last_send = cmd, now
 
     def send(self, cmd):
-        """One-shot commands: 'F' fire, 'Z' freeze."""
+        """One-shot commands: 'F' fire, 'Z' freeze (AI side); 'G' fire, 'Y' freeze (player 1, AI vs AI)."""
         self._write(cmd)
 
     def read_lines(self):
@@ -152,7 +168,7 @@ class Link:
             self._drop(e)
             return []
         for ch in data:
-            if ch in "lrsfz":
+            if ch in "lrsfzbnmgy":
                 self.echo_count += 1
             else:
                 self._rx += ch

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CHEERIVY</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage">
+    <div id="bg" class="layer"><div class="beam l"></div><div class="beam r"></div><div class="crowd"></div><div class="pitch"></div></div>
+    <div id="match" class="layer hidden">
+      <div class="board">
+        <canvas id="board"></canvas>
+        <div class="corner" id="board-corner"><i></i>AI VISION</div>
+        <div class="side-tag top" id="tag-top">CHEERIVY AI</div>
+        <div class="side-tag bottom" id="tag-bottom">PLAYER ONE</div>
+        <div class="rally" id="rally"><span>RALLY</span><b>0</b></div>
+      </div>
+      <div class="panel">
+        <div class="box clock" id="clock"><div class="kicker">TIME</div><div class="state" id="clock-state"></div><div class="t" id="clock-t">3:00</div></div>
+        <div class="box score">
+          <div class="team p1"><div class="stripe"></div><div class="who"><small>P1</small><b id="name-1">PLAYER ONE</b></div><div class="n" id="score-1">0</div></div>
+          <div class="team p2" id="team-2"><div class="stripe"></div><div class="who"><small id="tag-2">AI</small><b id="name-2">CHEERIVY AI</b></div><div class="n" id="score-2">0</div></div>
+        </div>
+        <div class="box freeze" id="freeze-box">
+          <div class="title"><span>BUZZER</span><span id="buzz-state">WAIT FOR IT</span></div>
+          <div class="fz p1" id="fz-1"><span class="tagp">P1</span><div class="bar"><i></i></div><span class="st"></span></div>
+          <div class="fz p2" id="fz-2"><span class="tagp" id="fz-tag-2">AI</span><div class="bar"><i></i></div><span class="st"></span></div>
+        </div>
+        <div class="chip-row" id="chips"></div>
+      </div>
+    </div>
+    <div id="screen" class="layer"></div>
+    <div id="overlay" class="layer"></div>
+    <div id="caption" class="off"><span class="mic">LIVE</span><span class="txt"></span></div>
+    <div id="dev" class="hidden"><div class="lcd" id="lcd"></div><pre id="log"></pre>
+      <div class="keys">P1: WASD · Space · Q back &nbsp; P2: arrows · Enter · Backspace back<br>
+        H pause (both hold) · G goal P1 · K goal P2/AI · Esc home · F1 settings · ` this panel</div></div>
+    <div id="offline">CONNECTING…</div>
+  </div>
+  <script src="board.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

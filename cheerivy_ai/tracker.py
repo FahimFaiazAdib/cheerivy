@@ -2,12 +2,14 @@
 B3 — Object detection on the flat (warped) arena image.
 
   Carriage : coloured tape/paper on TOP of the AI carriage (config.CARRIAGE_COLOR, e.g. green),
-             searched only near the AI baseline.
+             searched only near the AI baseline. In AI vs AI also PLAYER 1's carriage
+             (config.P1_CARRIAGE_COLOR, blue), searched only near the player 1 baseline.
   Ball     : round, sensible size, config.BALL_COLOR (e.g. orange, or black) — searched only
              INSIDE the arena walls, with the AI carriage's footprint hidden (its wheel is black).
 
 Returns positions in CENTIMETRES. In the top-down view of the main window:
-  LEFT-click the carriage tape -> re-sample its exact colour under your lighting
+  LEFT-click a carriage tape   -> re-sample its exact colour under your lighting
+                                  (top half = AI carriage, bottom half = player 1's carriage)
   RIGHT-click the ball         -> re-sample the ball's colour
 """
 import cv2
@@ -41,6 +43,9 @@ class Tracker:
     def __init__(self, arena):
         self.arena = arena
         self.carriage_ranges = C.COLORS[C.CARRIAGE_COLOR]
+        self.p1_ranges = C.COLORS[C.P1_CARRIAGE_COLOR]
+        self.find_p1 = False          # AI vs AI: look for player 1's carriage as well
+        self.p1_box = None
         self.ball_ranges = C.COLORS[C.BALL_COLOR]     # None = black ball (dark pixels)
         self.last_ball = None
         self.ball_mask = self.carriage_mask = None
@@ -65,6 +70,10 @@ class Tracker:
         if s < 60:
             print(f"[tracker] ignored click: that's not a colour (H={h} S={s} V={v}) — click ON the carriage tape")
             return
+        if y_px > C.ARENA_H / 2 * C.PX_PER_CM:        # the bottom half: player 1's carriage
+            self.p1_ranges = _hue_ranges(h, s, v, 10)
+            print(f"[tracker] PLAYER 1 carriage colour sampled: H={h} S={s} V={v}")
+            return
         self.carriage_ranges = _hue_ranges(h, s, v, 10)
         print(f"[tracker] carriage colour sampled: H={h} S={s} V={v}")
 
@@ -88,26 +97,35 @@ class Tracker:
             mask |= cv2.inRange(hsv, lo, hi)
         return mask
 
-    def find_carriage(self, hsv):
+    def find_carriage(self, hsv, player1=False):
+        """x (cm) of the AI carriage's tape, or of player 1's with player1=True, or None."""
         s = C.PX_PER_CM
-        mask = self._color_mask(hsv, self.carriage_ranges)
-        # The carriage can only be on its rail: between the baseline walls, near the AI end.
+        mask = self._color_mask(hsv, self.p1_ranges if player1 else self.carriage_ranges)
+        # The carriage can only be on its rail: between the baseline walls, near its own end.
         # (Everything else — e.g. a brown/maroon table or the ball — must not count.)
-        mask[int(C.CARRIAGE_BAND_CM * s):, :] = 0
+        if player1:
+            mask[:int((C.ARENA_H - C.CARRIAGE_BAND_CM) * s), :] = 0
+        else:
+            mask[int(C.CARRIAGE_BAND_CM * s):, :] = 0
         mask[:, :int(C.X0 * s)] = 0
         mask[:, int((C.X0 + C.BASE_W) * s):] = 0
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-        self.carriage_mask = mask
+        if not player1:
+            self.carriage_mask = mask
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        self.carriage_box = None
-        if not contours:
-            return None
-        c = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(c) / (s * s) < C.CARRIAGE_MIN_AREA_CM2:
-            return None
-        self.carriage_box = cv2.boundingRect(c)
-        m = cv2.moments(c)
-        return m["m10"] / m["m00"] / s
+        box = None
+        x = None
+        if contours:
+            c = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(c) / (s * s) >= C.CARRIAGE_MIN_AREA_CM2:
+                box = cv2.boundingRect(c)
+                m = cv2.moments(c)
+                x = m["m10"] / m["m00"] / s
+        if player1:
+            self.p1_box = box
+        else:
+            self.carriage_box = box
+        return x
 
     def find_ball(self, hsv, carriage_x):
         s = C.PX_PER_CM
@@ -124,6 +142,10 @@ class Tracker:
             x, y, w, h = self.carriage_box
             g = int(C.CARRIAGE_MASK_MARGIN * s)
             cv2.rectangle(mask, (x - g, 0), (x + w + g, y + h + g), 0, -1)
+        if self.find_p1 and self.p1_box is not None:   # player 1's carriage: hide it like the AI's
+            x, y, w, h = self.p1_box
+            g = int(C.CARRIAGE_MASK_MARGIN * s)
+            cv2.rectangle(mask, (x - g, y - g), (x + w + g, mask.shape[0]), 0, -1)
         # The human's carriage has black parts; the AI doesn't need the ball there.
         mask[int((C.ARENA_H - C.CARRIAGE_DEPTH + 0.5) * s):, :] = 0
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -152,6 +174,10 @@ class Tracker:
         return best
 
     def process(self, flat_img):
+        """-> (ball, AI carriage x, player 1 carriage x). Player 1's is None unless find_p1 is on."""
         hsv = cv2.cvtColor(cv2.GaussianBlur(flat_img, (5, 5), 0), cv2.COLOR_BGR2HSV)
         carriage_x = self.find_carriage(hsv)
-        return self.find_ball(hsv, carriage_x), carriage_x
+        p1_x = self.find_carriage(hsv, player1=True) if self.find_p1 else None
+        if not self.find_p1:
+            self.p1_box = None
+        return self.find_ball(hsv, carriage_x), carriage_x, p1_x

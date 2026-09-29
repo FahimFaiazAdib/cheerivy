@@ -87,9 +87,12 @@ SIM_BGR = {"orange": (20, 130, 245), "green": (60, 210, 90), "blue": (210, 110, 
 
 class SimArena:
     """
-    Fake phone view of the real octagonal board (see photoOfBoard.jpeg): white floor,
-    cream walls, steel rods, white carriages with black servos, coloured tape on the AI
-    carriage, black wires lying on the table outside. Seen slightly off-angle.
+    Fake phone view of the real board: white floor, cream walls, steel rods, white carriages
+    with black servos, coloured tape on the AI carriage, black wires lying on the table outside.
+    Seen slightly off-angle. The board is tilted like the real one (config.SIM_SLOPE).
+
+    Player 1's carriage stands still in the middle, unless the laptop drives it (AI vs AI, game 3:
+    'B' 'N' 'M' move, 'G' fire): then it has blue tape (config.P1_CARRIAGE_COLOR) and plays back.
     """
     MARGIN = 70
     CARRIAGE_SPEED = 30.0  # cm/s, from the project plan
@@ -109,11 +112,17 @@ class SimArena:
         to_cam = lambda pts: cv2.perspectiveTransform(np.float32([[(x * s, y * s) for x, y in pts]]), self.M)[0]
         self.corners = to_cam([(C.X0, 0), (C.X0 + C.BASE_W, 0), (C.X0 + C.BASE_W, C.ARENA_H), (C.X0, C.ARENA_H)])
         base = {(C.X0, 0), (C.X0 + C.BASE_W, 0), (C.X0 + C.BASE_W, C.ARENA_H), (C.X0, C.ARENA_H)}
-        self.wall_px = to_cam([p for p in self.arena.poly if p not in base])
+        extra = [p for p in self.arena.poly if p not in base]    # a rectangular board has none
+        self.wall_px = to_cam(extra) if extra else []
         self.background = self._draw_static()
         self.carriage_x = C.X0 + C.BASE_W / 2
         self.cmd = "S"
         self.fire_until = 0.0
+        self.p1_x = C.X0 + C.BASE_W / 2      # player 1's carriage
+        self.cmd1 = "M"
+        self.fire1_until = 0.0
+        self.p1_driven = False               # the laptop drives player 1 (AI vs AI)
+        self.slow_since = None
         self.t = time.time()
         self.seq = 0
         self.stats = {"blocked": 0, "conceded": 0}
@@ -142,7 +151,7 @@ class SimArena:
             cv2.line(img, (int((C.X0 - 4) * s), int(y * s) + 5), (int((C.X0 + C.BASE_W + 4) * s), int(y * s) + 5), (120, 120, 125), 5)
         return img
 
-    def _draw_carriage(self, img, x_cm, top, red):
+    def _draw_carriage(self, img, x_cm, top, red, tape=None):
         s = C.PX_PER_CM
         x0, x1 = int((x_cm - C.CARRIAGE_W / 2) * s), int((x_cm + C.CARRIAGE_W / 2) * s)
         y0 = 0 if top else int((C.ARENA_H - C.CARRIAGE_DEPTH) * s)
@@ -150,47 +159,91 @@ class SimArena:
         cv2.rectangle(img, (x0, y0), (x1, y1), (200, 220, 230), -1)
         cv2.rectangle(img, (x0, y0), (x1, y1), (150, 170, 180), 2)
         cv2.rectangle(img, (x0 + 10, y0 + 12), (x0 + 30, y1 - 12), (20, 20, 20), -1)   # black drive wheel
-        if red:                                                        # coloured tape (config.CARRIAGE_COLOR), centred
+        if red or tape:                                                # coloured tape, centred
             xc = (x0 + x1) // 2
-            cv2.rectangle(img, (xc - 15, y0 + 10), (xc + 15, y1 - 10), SIM_BGR[C.CARRIAGE_COLOR], -1)
+            cv2.rectangle(img, (xc - 15, y0 + 10), (xc + 15, y1 - 10), SIM_BGR[tape or C.CARRIAGE_COLOR], -1)
 
-    def _serve(self):
+    def _serve(self, from_ai=False):
+        """A new shot. One player: always a hard, wide shot from the human's end at the AI.
+        AI vs AI: the side that conceded restarts, struck from in front of its own carriage."""
+        if self.p1_driven:
+            top = from_ai
+            self.bx = self.carriage_x if top else self.p1_x
+            self.by = (C.CARRIAGE_DEPTH + C.BALL_RADIUS + 0.5) if top else (C.ARENA_H - C.CARRIAGE_DEPTH - C.BALL_RADIUS - 0.5)
+            ang, speed = random.uniform(-0.5, 0.5), random.uniform(35, 65)
+            self.vx, self.vy = speed * np.sin(ang), speed * np.cos(ang) * (1 if top else -1)
+            self.served = time.time()
+            return
         self.bx = random.uniform(C.X0 + 4, C.X0 + C.BASE_W - 4)
         self.by = C.ARENA_H - C.CARRIAGE_DEPTH - C.BALL_RADIUS - 0.5
-        ang = random.uniform(-0.8, 0.8)            # wide angles -> chamfer/side-wall bounces
+        ang = random.uniform(-0.8, 0.8)            # wide angles -> side-wall bounces
         speed = random.uniform(40, 80)
         self.vx, self.vy = speed * np.sin(ang), -speed * np.cos(ang)
         self.served = time.time()
 
     def on_command(self, cmd):
+        if len(cmd) > 1 and cmd[-1] != ";":   # the heartbeat sends the AI's and player 1's move together
+            for c in cmd:
+                self.on_command(c)
+            return
         if cmd == "F":
             self.fire_until = time.time() + 0.09
-        elif cmd in "LRS":
+        elif cmd == "G":
+            self.fire1_until = time.time() + 0.09
+            self.p1_driven = True
+        elif cmd in ("B", "N", "M"):
+            self.cmd1 = cmd
+            self.p1_driven = True
+        elif cmd in ("L", "R", "S"):
             self.cmd = cmd
-        elif cmd in "12":
+        elif cmd in ("1", "2", "3"):
             self.game = int(cmd)
         elif cmd == "K" and not self.in_match:
             self.in_match = True
             self.match_end = time.time() + self.match_seconds
-            self.lines.append(f"START LEVEL 2 {self.game}P")
+            self.lines.append(f"START LEVEL 2 {'AI' if self.game == 3 else f'{self.game}P'}")
         elif cmd == "E" and self.in_match:
             self.in_match = False
             self.lines.append("END")
 
+    @staticmethod
+    def _return_speed(vy, struck):
+        """Speed of a returned ball: a servo strike always hits about as hard (it doesn't add to the
+        incoming speed); a carriage that doesn't strike only bounces it back softer."""
+        return random.uniform(35, 65) if struck else max(abs(vy) * 0.7, 15.0)
+
     def _step(self, dt):
         r = C.BALL_RADIUS
+        self.vy += C.SIM_SLOPE[0 if self.by < C.ARENA_H / 2 else 1] * dt     # the tilted board
         self.bx, self.by, self.vx, self.vy = self.arena.advance(self.bx, self.by, self.vx, self.vy, dt)
+        if self.p1_driven:                   # AI vs AI: player 1's carriage plays the ball back
+            at_p1 = self.by + r >= C.ARENA_H - C.CARRIAGE_DEPTH and self.vy > 0
+            if at_p1 and abs(self.bx - self.p1_x) < C.CARRIAGE_W / 2 + r:
+                self.vy = -self._return_speed(self.vy, time.time() < self.fire1_until)
+                self.vx += random.uniform(-15, 15)
+            d1 = {"B": -1, "N": 1}.get(self.cmd1, 0) * self.CARRIAGE_SPEED * dt
+            self.p1_x = min(max(self.p1_x + d1, C.CARRIAGE_MIN_X), C.CARRIAGE_MAX_X)
         at_line = self.by - r <= C.CARRIAGE_DEPTH and self.vy < 0
         if at_line and abs(self.bx - self.carriage_x) < C.CARRIAGE_W / 2 + r:
-            boost = 1.3 if time.time() < self.fire_until else 0.8
-            self.vy = abs(self.vy) * boost
+            self.vy = self._return_speed(self.vy, time.time() < self.fire_until)
             self.vx += random.uniform(-15, 15)
             self.stats["blocked"] += 1
         if self.by < 0:
             self.stats["conceded"] += 1
             if self.in_match:
                 self.lines.append("G H")           # past the AI: the human scores
-            self._serve()
+            self._serve(from_ai=True)
+        elif self.p1_driven:
+            if self.by > C.ARENA_H:                 # past player 1's carriage: the AI scores
+                if self.in_match:
+                    self.lines.append("G A")
+                self._serve()
+            elif (self.vx ** 2 + self.vy ** 2) ** 0.5 < 3:   # stuck somewhere: serve again after 2 s
+                self.slow_since = self.slow_since or time.time()
+                if time.time() - self.slow_since > 2:
+                    self._serve()
+            else:
+                self.slow_since = None
         elif self.by > C.ARENA_H - C.CARRIAGE_DEPTH or time.time() - self.served > 4:
             human_x = C.X0 + C.BASE_W / 2           # the human carriage never moves in the sim
             if self.in_match and self.by > C.ARENA_H - C.CARRIAGE_DEPTH and abs(self.bx - human_x) > C.CARRIAGE_W / 2 + r:
@@ -213,7 +266,7 @@ class SimArena:
         s = C.PX_PER_CM
         flat = self.background.copy()
         self._draw_carriage(flat, self.carriage_x, top=True, red=True)
-        self._draw_carriage(flat, C.X0 + C.BASE_W / 2, top=False, red=False)
+        self._draw_carriage(flat, self.p1_x, top=False, red=False, tape=C.P1_CARRIAGE_COLOR if self.p1_driven else None)
         cv2.circle(flat, (int(self.bx * s), int(self.by * s)), int(C.BALL_RADIUS * s), SIM_BGR[C.BALL_COLOR], -1)
         frame = np.full((self.img_h, self.img_w, 3), (40, 50, 70), np.uint8)
         cv2.warpPerspective(flat, self.M, (self.img_w, self.img_h), dst=frame, borderMode=cv2.BORDER_TRANSPARENT)

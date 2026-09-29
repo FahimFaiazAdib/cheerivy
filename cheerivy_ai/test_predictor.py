@@ -43,6 +43,7 @@ class TestOctagon(unittest.TestCase):
         self.assertAlmostEqual(x, x_mid, delta=1e-6)
         self.assertEqual(len(path), 2)            # no bounces
 
+    @unittest.skipIf(C.CHAMFER_DX == 0, "rectangular board: no chamfers")
     def test_chamfer_redirects_ball(self):
         # Ball running up along the far-left side wall must hit the AI-side
         # chamfer and get pushed back toward the middle (x increases).
@@ -135,6 +136,65 @@ class TestPredictor(unittest.TestCase):
         for i, (x, y) in enumerate(pts):
             p.update(i * dt, x, y)
         self.assertLess(p.vx, 0)
+
+
+
+def roll(p, x, y, vx, vy, secs, slope, dt=1 / 30):
+    """Feed a ball rolling on a sloped board (slope = (AI half, P1 half) in cm/s²)."""
+    t = 0.0
+    while t < secs:
+        p.update(t, x, y)
+        a = slope[0 if y < C.ARENA_H / 2 else 1]
+        vy += a * dt
+        x += vx * dt
+        y += vy * dt
+        t += dt
+    return x, y, vx, vy
+
+
+class TestTilt(unittest.TestCase):
+    SLOPE = (-6.0, 6.0)        # sheet under the middle: each half rolls down to its own end
+
+    def tilted(self):
+        p = Predictor()
+        p.slope = list(self.SLOPE)
+        return p
+
+    def test_slow_push_rolls_back(self):
+        # pushed by the human at 12 cm/s: on a flat board it would reach the AI, uphill it can't
+        flat, tilt = Predictor(), self.tilted()
+        for p in (flat, tilt):
+            roll(p, 22, 38, 0, -12, 0.2, (0, 0))
+        self.assertIsNotNone(flat.intercept())
+        self.assertIsNone(tilt.intercept())
+
+    def test_fast_push_arrives_later_uphill(self):
+        # uphill to the middle, then downhill to the AI: still gets there
+        flat, tilt = Predictor(), self.tilted()
+        for p in (flat, tilt):
+            roll(p, 22, 38, 0, -40, 0.2, (0, 0))
+        self.assertIsNotNone(tilt.intercept())
+        self.assertNotAlmostEqual(tilt.intercept()[1], flat.intercept()[1], delta=0.01)
+
+    def test_ball_in_ai_half_comes_to_ai(self):
+        p = self.tilted()
+        roll(p, 22, 18, 0, 3, 0.3, self.SLOPE)          # drifting away, but downhill is toward the AI
+        self.assertIsNotNone(p.intercept())
+
+    def test_learns_the_slope(self):
+        p = Predictor()
+        p.slope = [0.0, 0.0]
+        for k in range(40):                               # many slow free rolls in the P1 half
+            p.reset()
+            roll(p, 22, 32, 0, -8, 0.8, self.SLOPE)
+        self.assertAlmostEqual(p.slope[1], self.SLOPE[1], delta=1.5)
+
+    def test_flat_board_unchanged(self):
+        p = Predictor()
+        p.slope = [0.0, 0.0]
+        feed(p, 20, 50, 0, -40)
+        self.assertFalse(p.tilted)
+        self.assertIsNotNone(p.intercept())
 
 
 if __name__ == "__main__":

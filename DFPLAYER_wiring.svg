@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" font-family="Helvetica, Arial, sans-serif">
+  <rect width="1400" height="900" fill="#ffffff"/>
+  <text x="700" y="42" font-size="28" font-weight="bold" text-anchor="middle" fill="#222">CHEERIVY voice: ATmega32 → DFPlayer Mini (microSD) → PAM8610 → 4 Ω 10 W speaker</text>
+  <text x="700" y="70" font-size="15" text-anchor="middle" fill="#666">All GND wires are joined together (common ground). Wire with everything unplugged.</text>
+
+  <!-- ================= legend ================= -->
+  <g font-size="14" fill="#333">
+    <line x1="40" y1="860" x2="80" y2="860" stroke="#d62728" stroke-width="4"/><text x="88" y="865">+5 V</text>
+    <line x1="150" y1="860" x2="190" y2="860" stroke="#ff7f0e" stroke-width="4"/><text x="198" y="865">+12 V (7–15 V)</text>
+    <line x1="320" y1="860" x2="360" y2="860" stroke="#111" stroke-width="4"/><text x="368" y="865">GND</text>
+    <line x1="430" y1="860" x2="470" y2="860" stroke="#1f77b4" stroke-width="4"/><text x="478" y="865">data (serial)</text>
+    <line x1="600" y1="860" x2="640" y2="860" stroke="#2ca02c" stroke-width="4"/><text x="648" y="865">audio</text>
+    <line x1="720" y1="860" x2="760" y2="860" stroke="#9467bd" stroke-width="4"/><text x="768" y="865">speaker</text>
+  </g>
+
+  <!-- ================= power supplies ================= -->
+  <rect x="40" y="110" width="250" height="90" rx="10" fill="#fff4e6" stroke="#ff7f0e" stroke-width="2"/>
+  <text x="165" y="140" font-size="18" font-weight="bold" text-anchor="middle">12 V supply</text>
+  <text x="165" y="162" font-size="13" text-anchor="middle" fill="#555">battery / adapter, 7–15 V, ≥ 1.5 A</text>
+  <text x="230" y="180" font-size="15" fill="#ff7f0e" font-weight="bold" text-anchor="end">+12 V →</text>
+  <text x="60" y="190" font-size="15" font-weight="bold">GND</text>
+
+  <rect x="40" y="240" width="250" height="90" rx="10" fill="#fdeaea" stroke="#d62728" stroke-width="2"/>
+  <text x="165" y="270" font-size="18" font-weight="bold" text-anchor="middle">5 V rail</text>
+  <text x="165" y="292" font-size="13" text-anchor="middle" fill="#555">the robot's existing 5 V (regulator / buck)</text>
+  <text x="70" y="320" font-size="15" fill="#d62728" font-weight="bold">+5 V</text>
+  <text x="235" y="320" font-size="15" font-weight="bold">GND</text>
+
+  <!-- GND bus -->
+  <line x1="40" y1="800" x2="1360" y2="800" stroke="#111" stroke-width="5"/>
+  <text x="1355" y="822" font-size="15" font-weight="bold" text-anchor="end">COMMON GND BUS</text>
+
+  <!-- ================= ATmega32 ================= -->
+  <rect x="40" y="420" width="250" height="300" rx="10" fill="#f2f2f2" stroke="#444" stroke-width="2"/>
+  <text x="165" y="452" font-size="20" font-weight="bold" text-anchor="middle">ATmega32</text>
+  <text x="165" y="474" font-size="13" text-anchor="middle" fill="#555">(only the pins used here)</text>
+  <g font-size="15">
+    <text x="60" y="520">pin 10  VCC</text>
+    <text x="60" y="570">pin 11  GND</text>
+    <text x="60" y="620" font-weight="bold" fill="#1f77b4">pin 35  PA5</text>
+    <text x="60" y="645" font-size="12" fill="#555">software serial TX to DFPlayer</text>
+    <text x="60" y="690" font-size="12" fill="#555">HC-05 stays on pins 14/15 as before</text>
+  </g>
+  <circle cx="290" cy="515" r="5" fill="#d62728"/>
+  <circle cx="290" cy="565" r="5" fill="#111"/>
+  <circle cx="290" cy="615" r="5" fill="#1f77b4"/>
+
+  <!-- 5 V to ATmega VCC -->
+  <polyline points="120,330 120,370 330,370 330,515 290,515" fill="none" stroke="#d62728" stroke-width="3"/>
+  <!-- ATmega GND to bus -->
+  <polyline points="290,565 310,565 310,800" fill="none" stroke="#111" stroke-width="3"/>
+  <!-- 5V rail GND -->
+  <polyline points="250,330 250,350 20,350 20,800 40,800" fill="none" stroke="#111" stroke-width="3"/>
+  <!-- 12V GND -->
+  <polyline points="75,200 75,215 10,215 10,800 40,800" fill="none" stroke="#111" stroke-width="3"/>
+
+  <!-- ================= 1k resistor ================= -->
+  <line x1="290" y1="615" x2="380" y2="615" stroke="#1f77b4" stroke-width="3"/>
+  <rect x="380" y="603" width="70" height="24" fill="#fff" stroke="#1f77b4" stroke-width="3"/>
+  <text x="415" y="596" font-size="15" font-weight="bold" text-anchor="middle" fill="#1f77b4">1 kΩ</text>
+  <text x="415" y="648" font-size="12" text-anchor="middle" fill="#555">protects the 3.3 V input</text>
+  <polyline points="450,615 480,615 480,485 540,485" fill="none" stroke="#1f77b4" stroke-width="3"/>
+
+  <!-- ================= DFPlayer Mini ================= -->
+  <rect x="540" y="380" width="300" height="360" rx="10" fill="#eef3fb" stroke="#1f3b73" stroke-width="2.5"/>
+  <text x="690" y="408" font-size="20" font-weight="bold" text-anchor="middle">DFPlayer Mini</text>
+  <text x="690" y="428" font-size="12" text-anchor="middle" fill="#555">(top view, microSD slot side)  pin 1 = top-left</text>
+  <g font-size="14">
+    <!-- left column pins 1..8 -->
+    <text x="552" y="458">1  VCC</text>
+    <text x="552" y="490" fill="#1f77b4" font-weight="bold">2  RX</text>
+    <text x="552" y="522" fill="#999">3  TX  (not used)</text>
+    <text x="552" y="554" fill="#2ca02c" font-weight="bold">4  DAC_R</text>
+    <text x="552" y="586" fill="#2ca02c" font-weight="bold">5  DAC_L</text>
+    <text x="552" y="618" fill="#999">6  SPK1  ✗ leave empty</text>
+    <text x="552" y="650">7  GND</text>
+    <text x="552" y="682" fill="#999">8  SPK2  ✗ leave empty</text>
+    <!-- right column pins 16..9 -->
+    <text x="828" y="458" text-anchor="end" fill="#999">BUSY  16</text>
+    <text x="828" y="490" text-anchor="end" fill="#999">USB−  15</text>
+    <text x="828" y="522" text-anchor="end" fill="#999">USB+  14</text>
+    <text x="828" y="554" text-anchor="end" fill="#999">ADKEY2  13</text>
+    <text x="828" y="586" text-anchor="end" fill="#999">ADKEY1  12</text>
+    <text x="828" y="618" text-anchor="end" fill="#999">IO2  11</text>
+    <text x="828" y="650" text-anchor="end" fill="#999">GND  10</text>
+    <text x="828" y="682" text-anchor="end" fill="#999">IO1  9</text>
+  </g>
+  <circle cx="540" cy="453" r="5" fill="#d62728"/>
+  <circle cx="540" cy="485" r="5" fill="#1f77b4"/>
+  <circle cx="540" cy="549" r="5" fill="#2ca02c"/>
+  <circle cx="540" cy="581" r="5" fill="#2ca02c"/>
+  <circle cx="540" cy="645" r="5" fill="#111"/>
+  <!-- RX wire lands on pin 2 -->
+  <!-- VCC 5 V -->
+  <polyline points="200,330 200,390 510,390 510,453 540,453" fill="none" stroke="#d62728" stroke-width="3"/>
+  <!-- GND pin 7 -->
+  <polyline points="540,645 515,645 515,800" fill="none" stroke="#111" stroke-width="3"/>
+
+  <!-- microSD card -->
+  <rect x="640" y="700" width="100" height="30" rx="4" fill="#333"/>
+  <text x="690" y="720" font-size="12" text-anchor="middle" fill="#fff">microSD 8 GB</text>
+  <text x="690" y="765" font-size="13" text-anchor="middle" fill="#1f3b73">FAT32 · card root: /MP3  and  /ADVERT</text>
+  <text x="690" y="782" font-size="12" text-anchor="middle" fill="#555">285 files each (0001.mp3 … 0285.mp3)</text>
+
+  <!-- ================= PAM8610 ================= -->
+  <rect x="990" y="380" width="260" height="300" rx="10" fill="#eefaf0" stroke="#1b6e2a" stroke-width="2.5"/>
+  <text x="1120" y="408" font-size="20" font-weight="bold" text-anchor="middle">PAM8610</text>
+  <text x="1120" y="428" font-size="12" text-anchor="middle" fill="#555">10 W class-D amplifier</text>
+  <g font-size="14">
+    <text x="1002" y="470" fill="#2ca02c" font-weight="bold">R IN</text>
+    <text x="1002" y="505" fill="#2ca02c" font-weight="bold">L IN</text>
+    <text x="1002" y="540">IN GND *</text>
+    <text x="1002" y="605" fill="#ff7f0e" font-weight="bold">VCC + (12 V)</text>
+    <text x="1002" y="640">GND −</text>
+    <text x="1238" y="470" text-anchor="end" fill="#9467bd" font-weight="bold">L+</text>
+    <text x="1238" y="505" text-anchor="end" fill="#9467bd" font-weight="bold">L−</text>
+    <text x="1238" y="540" text-anchor="end" fill="#999">R+  (empty)</text>
+    <text x="1238" y="575" text-anchor="end" fill="#999">R−  (empty)</text>
+  </g>
+  <circle cx="990" cy="465" r="5" fill="#2ca02c"/>
+  <circle cx="990" cy="500" r="5" fill="#2ca02c"/>
+  <circle cx="990" cy="535" r="5" fill="#111"/>
+  <circle cx="990" cy="600" r="5" fill="#ff7f0e"/>
+  <circle cx="990" cy="635" r="5" fill="#111"/>
+  <circle cx="1250" cy="465" r="5" fill="#9467bd"/>
+  <circle cx="1250" cy="500" r="5" fill="#9467bd"/>
+
+  <!-- audio DAC_R -> R IN, DAC_L -> L IN -->
+  <polyline points="540,549 525,549 525,360 930,360 930,465 990,465" fill="none" stroke="#2ca02c" stroke-width="3"/>
+  <polyline points="540,581 530,581 530,350 945,350 945,500 990,500" fill="none" stroke="#2ca02c" stroke-width="3" stroke-dasharray="0"/>
+  <!-- input GND to DFPlayer GND (pin 10 side via bus) -->
+  <polyline points="990,535 960,535 960,800" fill="none" stroke="#111" stroke-width="3"/>
+  <!-- 12 V -->
+  <polyline points="290,175 900,175 900,600 990,600" fill="none" stroke="#ff7f0e" stroke-width="3"/>
+  <!-- PAM GND -->
+  <polyline points="990,635 975,635 975,800" fill="none" stroke="#111" stroke-width="3"/>
+  <!-- capacitor across PAM power -->
+  <line x1="900" y1="660" x2="900" y2="690" stroke="#ff7f0e" stroke-width="3"/>
+  <line x1="885" y1="690" x2="915" y2="690" stroke="#333" stroke-width="3"/>
+  <line x1="885" y1="700" x2="915" y2="700" stroke="#333" stroke-width="3"/>
+  <line x1="900" y1="700" x2="900" y2="800" stroke="#111" stroke-width="3"/>
+  <line x1="900" y1="600" x2="900" y2="660" stroke="#ff7f0e" stroke-width="3"/>
+  <text x="900" y="822" font-size="12" text-anchor="middle" fill="#555">470–1000 µF across 12 V (stops motor hum)</text>
+
+  <!-- ================= speaker ================= -->
+  <g transform="translate(1290,450)">
+    <rect x="0" y="0" width="30" height="70" fill="#ddd" stroke="#555" stroke-width="2"/>
+    <polygon points="30,0 90,-35 90,105 30,70" fill="#eee" stroke="#555" stroke-width="2"/>
+  </g>
+  <text x="1335" y="590" font-size="15" font-weight="bold" text-anchor="middle">Speaker</text>
+  <text x="1335" y="608" font-size="13" text-anchor="middle">4 Ω 10 W</text>
+  <polyline points="1250,465 1290,465" fill="none" stroke="#9467bd" stroke-width="3"/>
+  <polyline points="1250,500 1270,500 1270,505 1290,505" fill="none" stroke="#9467bd" stroke-width="3"/>
+
+  <!-- ================= warnings ================= -->
+ <rect x="990" y="690" width="370" height="85" rx="8" fill="#fff0f0" stroke="#d62728" stroke-width="1.5"/>
+  <text x="1005" y="712" font-size="13" fill="#b00">⚠ Never connect L− or R− to GND (bridged outputs).</text>
+  <text x="1005" y="732" font-size="13" fill="#b00">⚠ PAM8610 needs 7–15 V, not 5 V.</text>
+  <text x="1005" y="752" font-size="13" fill="#b00">⚠ DFPlayer SPK1 / SPK2 stay empty.</text>
+  <text x="1005" y="770" font-size="13" fill="#b00">⚠ Robot off while wiring and inserting the card.</text>
+  <text x="1002" y="662" font-size="11" fill="#1b6e2a">* No IN GND pin? Take the DFPlayer GND</text>
+  <text x="1002" y="676" font-size="11" fill="#1b6e2a">   to the PAM power GND (−) instead.</text>
+</svg>

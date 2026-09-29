@@ -33,12 +33,15 @@
  *  Laptop protocol (single bytes):
  *    'L' 'R' 'S' move/stop AI carriage   'F' fire AI servo   'Z' freeze the human
  *      (these are echoed back in lowercase)
- *    '1' / '2'   choose single player / two players (lobby)   'K' kick off   'E' end the match now
+ *    '1' / '2' / '3'   choose single player / two players / AI vs AI (lobby)   'K' kick off   'E' end the match now
+ *    AI vs AI (game 3): the laptop's camera AI also drives PLAYER 1's carriage (blue tape on it):
+ *      'B' 'N' 'M' move left / right / stop player 1   'G' fire player 1's servo   'Y' freeze the AI side
+ *      (echoed in lowercase too). The joystick and button of player 1 are ignored in this game.
  *    No byte for LINK_HOLD_MS (0.4 s) -> AI carriage stops and waits; for LINK_TIMEOUT_MS (1.5 s) ->
  *    Mirror AI takes over (falling tone); link back -> rising tone.
  *
  *  Lines sent to the laptop:  "READY" (every second in the lobby)
- *    "START LEVEL n 1P|2P"   "T <seconds left> CAM|MIR|P2"
+ *    "START LEVEL n 1P|2P|AI"   "T <seconds left> CAM|MIR|P2|AI"
  *    "G H <human> <ai>" human scored   "G A <human> <ai>" AI scored   "END <human> <ai>"
  */
 #ifndef F_CPU
@@ -397,7 +400,9 @@ static volatile char rx_move = 'S';
 static volatile uint8_t rx_fire, rx_freeze;
 static volatile uint32_t rx_last_ms;
 static volatile uint8_t rx_seen;
-static volatile uint8_t rx_game = 1;    /* '1' / '2' from the laptop menu: 1 = vs AI, 2 = two players */
+static volatile uint8_t rx_game = 1;    /* '1' / '2' / '3' from the laptop menu: vs AI, two players, AI vs AI */
+static volatile char rx_move1 = 'M';    /* AI vs AI: the laptop's move for player 1 ('B' 'N' 'M') */
+static volatile uint8_t rx_fire1, rx_freeze1;
 static volatile uint8_t rx_kick, rx_end; /* 'K' kick off (in the lobby), 'E' end the match early */
 
 static void uart_init(void) {
@@ -410,7 +415,7 @@ static void uart_init(void) {
 
 ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds */
   char c = UDR;
-  uint8_t echo = 1;                     /* only L R S F Z are echoed; menu bytes would garble status lines */
+  uint8_t echo = 1;                     /* only moves / fire / freeze are echoed; menu bytes would garble status lines */
   if (df_cmd) {                         /* inside "P123;" / "V25;": collect the number */
     if (c >= '0' && c <= '9') { df_num = df_num * 10 + (c - '0'); return; }
     if (c == ';') {
@@ -436,7 +441,10 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
     case 'Z': rx_freeze = 1; break;
-    case '1': case '2': rx_game = c - '0'; echo = 0; break;
+    case 'B': case 'N': case 'M': rx_move1 = c; break;   /* AI vs AI: player 1's carriage */
+    case 'G': rx_fire1 = 1; break;
+    case 'Y': rx_freeze1 = 1; break;
+    case '1': case '2': case '3': rx_game = c - '0'; echo = 0; break;
     case 'K': rx_kick = 1; echo = 0; break;
     case 'E': rx_end = 1; echo = 0; break;
     default: return;
@@ -580,7 +588,7 @@ static void init_all(void) {
 /* ============================================================== LOBBY */
 /* Wait here between matches. The laptop sends '1' or '2' (menu) and then 'K' (kick off).
    Without a laptop, pressing FREEZE starts a single-player game against Mirror AI.
-   Returns the game: 1 = human vs AI, 2 = two players. */
+   Returns the game: 1 = human vs AI, 2 = two players, 3 = AI vs AI (camera AI on both sides). */
 static uint8_t lobby(void) {
   motor_ai(0);
   motor_human(0);
@@ -597,6 +605,7 @@ static uint8_t lobby(void) {
     }
     if (rx_kick) {
       rx_kick = 0;
+      if (rx_game == 3) return 3;
       return (ALLOW_2P && rx_game == 2) ? 2 : 1;
     }
     uint8_t down = freeze_btn_down();
@@ -614,7 +623,7 @@ static void play_match(uint8_t game, uint8_t level) {
   wait_ms(700);
   uart_puts("START LEVEL ");
   uart_putu(level + 1);
-  uart_puts(game == 2 ? " 2P\n" : " 1P\n");
+  uart_puts(game == 3 ? " AI\n" : game == 2 ? " 2P\n" : " 1P\n");
   lasers_report();
 
   uint32_t start = millis();
@@ -638,9 +647,40 @@ static void play_match(uint8_t game, uint8_t level) {
     buzz_update(now);
     servo_update(now);
 
-    /* ---------------- HUMAN (player 1) ---------------- */
+    /* link to the laptop (checked here: in AI vs AI it drives player 1 too) */
+    uint32_t last_rx;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
+    /* A byte can arrive after `now` was read, making last_rx newer than now. Unsigned
+       now - last_rx would then wrap to ~49 days and look like "laptop gone". */
+    uint32_t rx_age = (last_rx > now) ? 0 : now - last_rx;
+    uint8_t link_now = rx_seen && (rx_age < LINK_TIMEOUT_MS);
+    if (link_now != link_up) {
+      link_up = link_now;
+      if (game != 2) {                  /* in 2P nobody cares which AI would be playing */
+        PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
+        uart_puts(link_up ? "MODE CAMERA\n" : (MIRROR_AI && game == 1 ? "MODE MIRROR\n" : "MODE WAIT\n"));
+      }
+    }
+
+    /* ---------------- PLAYER 1: the human, or the camera AI in AI vs AI ---------------- */
     int8_t human_dir = 0;
-    if (now >= human_frozen_until) {
+    if (game == 3) {
+      if (now >= human_frozen_until && link_up) {
+        human_dir = (rx_move1 == 'B') ? -1 : (rx_move1 == 'N') ? 1 : 0;
+        if (rx_age >= LINK_HOLD_MS) human_dir = 0;   /* laptop quiet for a moment: wait */
+        if (rx_fire1) { rx_fire1 = 0; servo_fire(SERVO_HUMAN, now); }
+        if (rx_freeze1) {
+          rx_freeze1 = 0;
+          if (now >= human_freeze_ready) {
+            ai_frozen_until = now + FREEZE_MS;
+            human_freeze_ready = now + FREEZE_COOLDOWN_MS;
+            PLAY(SND_SIREN);
+          }
+        }
+      } else {
+        rx_fire1 = rx_freeze1 = 0;      /* frozen or no laptop: stand still, drop queued actions */
+      }
+    } else if (now >= human_frozen_until) {
       uint16_t x = adc_read(1), y = adc_read(3);
       human_dir = joy_dir(x);
       if (y > JOY_HIGH && servo_ready(SERVO_HUMAN, now)) {
@@ -660,19 +700,6 @@ static void play_match(uint8_t game, uint8_t level) {
     mirror_record(now, human_dir);
 
     /* ---------------- AI side: laptop AI / Mirror AI / player 2 ---------------- */
-    uint32_t last_rx;
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { last_rx = rx_last_ms; }
-    /* A byte can arrive after `now` was read, making last_rx newer than now. Unsigned
-       now - last_rx would then wrap to ~49 days and look like "laptop gone". */
-    uint32_t rx_age = (last_rx > now) ? 0 : now - last_rx;
-    uint8_t link_now = rx_seen && (rx_age < LINK_TIMEOUT_MS);
-    if (link_now != link_up) {
-      link_up = link_now;
-      if (game == 1) {                  /* in 2P nobody cares which AI would be playing */
-        PLAY(link_up ? SND_LINK_UP : SND_LINK_DOWN);
-        uart_puts(link_up ? "MODE CAMERA\n" : (MIRROR_AI ? "MODE MIRROR\n" : "MODE WAIT\n"));
-      }
-    }
 
     int8_t ai_dir = 0;
     if (now >= ai_frozen_until) {
@@ -700,6 +727,9 @@ static void play_match(uint8_t game, uint8_t level) {
             PLAY(SND_SIREN);
           }
         }
+        mirror_fire_at = 0;
+      } else if (game == 3) {
+        ai_dir = 0;                     /* AI vs AI without the laptop: nobody to copy, stand still */
         mirror_fire_at = 0;
       } else {
 #if MIRROR_AI
@@ -741,7 +771,8 @@ static void play_match(uint8_t game, uint8_t level) {
       next_telemetry = now + TELEMETRY_MS;
       uart_puts("T ");
       uart_putu(left);
-      uart_puts(game == 2 ? " P2\n" : link_up ? " CAM\n" : (MIRROR_AI ? " MIR\n" : " WAIT\n"));
+      uart_puts(game == 2 ? " P2\n" : game == 3 ? (link_up ? " AI\n" : " WAIT\n")
+                : link_up ? " CAM\n" : (MIRROR_AI ? " MIR\n" : " WAIT\n"));
     }
   }
 
