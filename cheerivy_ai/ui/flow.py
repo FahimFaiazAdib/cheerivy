@@ -74,9 +74,12 @@ SETTINGS = [
     ("Servo tuning", "p2_test", "P2 test strike", None, None),
     ("Camera & AI", "recalibrate", "Recalibrate board", None, None),
     ("Camera & AI", "reteach", "Re-teach colours", None, None),
-    ("Camera & AI", "swap_lr", "Swap L/R", (True, False), True),
+    ("Camera & AI", "swap_lr", "Swap L/R (AI carriage)", (True, False), True),
+    ("Camera & AI", "swap_lr_p1", "Swap L/R (player 1, AI vs AI)", (False, True), False),
     ("Camera & AI", "debug", "AI debug overlay", (False, True), False),
+    ("Debug", "motor_test", "Motor & striker test", None, None),
 ]
+DEBUG_MOVE_S = 0.3        # debug: one key press drives a carriage this long
 SPEC = {s[1]: s for s in SETTINGS}
 GROUPS = list(dict.fromkeys(s[0] for s in SETTINGS))
 
@@ -236,6 +239,8 @@ class Flow:
         self.menu = {"title": title, "items": items, "cursor": cursor}
 
     def _home(self, now):
+        if getattr(self, "screen", None) == "debug":
+            self._robot("debug off")
         self._stop_script()
         self.last_input = self.now
         self.running = False
@@ -310,6 +315,8 @@ class Flow:
         if s == "settings":
             if self.menu.get("group") is None:
                 return self._settings_items(i)
+            if i == "motor_test":
+                return self._debug()
             if SPEC[i][3] is None:
                 return self._hook("action", i)
             return self._change_setting(i, +1)
@@ -332,6 +339,41 @@ class Flow:
             return self._home(self.now)
         if s == "pause":
             return self._resume()
+        if s == "debug":
+            self._robot("debug off")
+            return self._settings_items("Debug")
+
+    # ---------------------------------------------------------------- debug
+    # Motor & striker test (Settings > Debug), with the camera view on screen:
+    #   the joysticks drive their carriage + striker directly on the robot (firmware game 4);
+    #   the keyboard too: player 1 W A S D, the AI side arrows (one press = a short move).
+    def _debug(self):
+        self._stop_script()
+        self._enter("debug")
+        self.debug_last = {1: "—", 2: "—"}
+        self._robot("debug on")
+
+    def _debug_input(self, kind, a):
+        if kind == "back":
+            return self._back()
+        p = a[0]
+        if kind == "dbg":                     # the robot moved it itself: just show it
+            self.debug_last[p] = {"L": "LEFT", "R": "RIGHT", "U": "STRIKE", "D": "DOWN", "B": "BUTTON"}.get(a[1], a[1])
+            return
+        if kind == "dir":
+            d = a[1]
+            if d in "LR":
+                self._robot(f"test {p} {d} {DEBUG_MOVE_S}")
+                self.debug_last[p] = "LEFT" if d == "L" else "RIGHT"
+            elif d == "U":
+                self._robot(f"test {p} F")
+                self.debug_last[p] = "STRIKE"
+            else:
+                self._robot(f"test {p} S")
+                self.debug_last[p] = "STOP"
+        elif kind == "btn":
+            self._robot(f"test {p} F")
+            self.debug_last[p] = "STRIKE"
 
     # ---------------------------------------------------------------- match
     def _reset_match(self):
@@ -723,6 +765,8 @@ class Flow:
             return
         if kind == "goal":
             return self._goal(a[0], own=len(a) > 1 and a[1] == "own")
+        if self.screen == "debug":
+            return self._debug_input(kind, a)
         if self.screen == "attract":
             return self._home(now)
         if kind == "back":
@@ -812,6 +856,8 @@ class Flow:
             l = (f"GOAL! {self.tag(self.flash)}" if self.flash else "GOLDEN GOAL", sc)
         elif s == "pause":
             l = ("PAUSED", "Resume  Home")
+        elif s == "debug":
+            l = ("DEBUG", "Motor test")
         else:
             l = ("FULL TIME", sc)
         l = tuple(x[:16].ljust(16) for x in l)
@@ -839,6 +885,7 @@ class Flow:
             "length_s": self.length_s,
             "names": {"1": self.name(1), "2": self.name(2)},
             "tags": {"1": self.tag(1), "2": self.tag(2)},
+            "debug": getattr(self, "debug_last", None) if self.screen == "debug" else None,
             "score": self.score,
             "clock": round(self.clock, 1),
             "running": self.running,

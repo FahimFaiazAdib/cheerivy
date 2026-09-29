@@ -203,6 +203,7 @@ def main():
         or list(range(1, 201))
     cam_score = {"H": 0, "A": 0}
     in_match = False
+    was_debug = False
     try:
         while True:
             frame, stamp, seq = source.read()
@@ -254,8 +255,17 @@ def main():
             if paused:
                 cmd, fire = (manual if now < manual_until else "S"), False
                 status = "PAUSED - space to start AI, a/d to drive by hand"
+            debug = bool(live and live.debug)
+            if debug:                               # Settings > Debug: the keyboard drives both carriages
+                cmd, fire = live.manual_cmd(2, now), False
+                status = "DEBUG: motor & striker test (joysticks / W A S D / arrows)"
+                link.move1(live.manual_cmd(1, now))
+            elif was_debug and not aivai:
+                link.move1("S")
+                link.move1(None)
+            was_debug = debug
             link.move(cmd)
-            if aivai:                               # player 1's carriage, driven by the second AI
+            if aivai and not debug:                 # player 1's carriage, driven by the second AI
                 cmd1, fire1, status1 = ctrl1.update(pred1, p1_x, now)
                 if ctrl1.swap_request:
                     ctrl1.swap_request = False

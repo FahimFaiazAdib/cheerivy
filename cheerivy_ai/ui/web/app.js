@@ -3,7 +3,7 @@
 const $ = id => document.getElementById(id);
 const stage = $('stage');
 let S = null, scale = 1;
-const MATCH = ['prematch', 'ready', 'countdown', 'live', 'goal', 'pause'];
+const MATCH = ['prematch', 'ready', 'countdown', 'live', 'goal', 'pause', 'debug'];
 
 // ------------------------------------------------------------------ plumbing
 function fit() {
@@ -276,6 +276,17 @@ function overlayFor() {
     return ['goal' + p + a + b, `<div class="goal ${side(p)}"><div class="wipe"></div><div class="streaks"></div>
       <div class="word">GOAL!</div><div class="by">${esc(n[p])}${S.golden ? ' WINS IT' : ''}</div>
       <div class="line"><span>${a} – ${b}</span><small>${S.golden ? 'GOLDEN GOAL' : esc(lead)}</small></div></div>`];
+  }
+  if (sc === 'debug') {
+    const d = S.debug || {}, n = S.names;
+    const col = (p, keys) => `<div class="dbg-side ${side(p)}"><small>${p === 1 ? 'PLAYER 1 CARRIAGE' : 'AI-SIDE CARRIAGE'}</small>
+      <div class="dbg-keys">${keys}</div><div class="dbg-last">${esc(d[p] || '—')}</div></div>`;
+    return ['debug' + d[1] + d[2], `<div class="debug"><div class="dbg-title">MOTOR &amp; STRIKER TEST</div>
+      <div class="dbg-cols">
+        ${col(1, 'JOYSTICK 1 · <b>A</b> ◀ &nbsp;<b>D</b> ▶ &nbsp;<b>W</b> STRIKE &nbsp;<b>S</b> STOP')}
+        ${col(2, 'JOYSTICK 2 · <b>←</b> ◀ &nbsp;<b>→</b> ▶ &nbsp;<b>↑</b> STRIKE &nbsp;<b>↓</b> STOP')}
+      </div>
+      <div class="dbg-hint">Wrong way? Settings › Camera &amp; AI › Swap L/R &nbsp;·&nbsp; hold a joystick down 1 s or press Q to go back</div></div>`];
   }
   if (sc === 'pause') return ['pause', `<div class="dim"></div><div class="pause"><div class="question">Paused</div>
     ${S.menu.items.map((it, i) => `<div class="item" data-i="${i}">${esc(it.label)}</div>`).join('')}</div>`];

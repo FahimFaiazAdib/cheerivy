@@ -43,6 +43,8 @@ class LiveGame:
         self.locked = True
         self.robot_screen = False        # the robot is in screen mode (it says "SCREEN" every second)
         self.want_recalibrate = False
+        self.debug = False               # Settings > Debug > Motor & striker test is open
+        self.manual = {1: ("S", 0.0), 2: ("S", 0.0)}   # debug keyboard moves: (L/R/S, until)
         self._last_video = 0.0
         self.flow.hooks.update(robot=self._robot, setting=self._setting, action=self._action)
         if self.sound and self.sound.ok:
@@ -84,7 +86,9 @@ class LiveGame:
                 self.hub.event(("pause",))
             elif len(p) == 3 and p[1] in "12":
                 who, what = int(p[1]), p[2]
-                if what in INPUT:
+                if self.flow.screen == "debug" and what in "LRUDB":
+                    self.hub.event(("dbg", who, what))   # the robot already moved it: just show it
+                elif what in INPUT:
                     self.hub.event(("dir", who, INPUT[what]))
                 elif what == "B":
                     self.hub.event(("btn", who))
@@ -103,6 +107,11 @@ class LiveGame:
         if camera and self.in_play():               # the lasers beep by themselves; for the camera, ask
             self.link.send("D7;" if scorer == 1 else "D8;")
         self.hub.event(("goal", scorer, own))
+
+    def manual_cmd(self, p, now):
+        """Debug: the keyboard's move for carriage p right now ('L' 'R' 'S')."""
+        cmd, until = self.manual[p]
+        return cmd if now < until else "S"
 
     # ------------------------------------------------------------ camera -> game
     def frame(self, stamp, flat, board, slope):
@@ -139,6 +148,25 @@ class LiveGame:
             send("D9;")
         elif a[0] == "freeze":
             send(f"I{a[1]}{a[2]};")
+        elif a[0] == "debug":                        # motor & striker test: firmware game 4
+            self.debug = a[1] == "on"
+            self.manual = {1: ("S", 0.0), 2: ("S", 0.0)}
+            if self.debug:
+                self.locked = False
+                send("C4;")
+                send("O1;")
+            else:
+                self.locked = True
+                send("O0;")
+                send(f"C{self.game};")
+        elif a[0] == "test" and self.debug:          # test <p> L|R <seconds> / F / S
+            p = int(a[1])
+            if a[2] in "LR":
+                self.manual[p] = (a[2], time.time() + float(a[3]))
+            elif a[2] == "F":
+                send("G" if p == 1 else "F")
+            else:
+                self.manual[p] = ("S", 0.0)
         elif a[0] == "mode":
             self.game = GAME_CODE.get(a[1], 0)
             if len(a) > 2:
@@ -157,6 +185,9 @@ class LiveGame:
             self.link.send(f"Q{s['p2_rest']};W{max(0, s['p2_rest'] - s['p2_swing'])};")
         elif key == "swap_lr":
             self.link.swap = bool(value)
+        elif key == "swap_lr_p1":
+            self.link.swap1 = bool(value)
+            self.link.current1 = None
 
     def _action(self, key):
         if key == "p1_test":

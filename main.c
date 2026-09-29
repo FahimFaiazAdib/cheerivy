@@ -41,7 +41,9 @@
  *    Mirror AI takes over (falling tone); link back -> rising tone.
  *
  *  SCREEN MODE (the new browser game, cheerivy_ai/main.py): the laptop runs the whole game.
- *    "C<n>;"  enter / set the game: 0 none yet (menus), 1 vs AI, 2 two players, 3 AI vs AI
+ *    "C<n>;"  enter / set the game: 0 none yet (menus), 1 vs AI, 2 two players, 3 AI vs AI,
+ *             4 DEBUG (motor & striker test): both joysticks drive their own carriage + striker
+ *             directly, and the laptop's keyboard moves (L R S F / B N M G) work too
  *    "O1;" unlock (play)   "O0;" lock (carriages stop, strikers rest, joysticks only report)
  *    "D<n>;"  sounds: 3 / 2 / 1 countdown beep, 0 GO, 9 the buzzer-race beep,
  *             7 / 8 goal tune (player 1 / AI side scored; for goals the camera saw)
@@ -918,6 +920,10 @@ static void screen_game(void) {
       } else {
         d1 = s1.xs;
         if (s1.ys > 0 && servo_ready(SERVO_HUMAN, now)) servo_fire(SERVO_HUMAN, now);
+        if (game == 4) {                       /* debug: the laptop's keyboard too */
+          if (!d1 && rx_age < LINK_HOLD_MS) d1 = (rx_move1 == 'B') ? -1 : (rx_move1 == 'N') ? 1 : 0;
+          if (rx_fire1) servo_fire(SERVO_HUMAN, now);
+        }
       }
     }
     rx_fire1 = rx_freeze1 = 0;
@@ -926,9 +932,13 @@ static void screen_game(void) {
     /* side 2: the camera AI, or player 2's joystick */
     int8_t d2 = 0;
     if (play && now >= ai_frozen_until) {
-      if (game == 2) {
+      if (game == 2 || game == 4) {
         d2 = s2.xs;
         if (s2.ys > 0) servo_fire(SERVO_AI, now);
+        if (game == 4) {                       /* debug: the laptop's keyboard too */
+          if (!d2 && rx_age < LINK_HOLD_MS) d2 = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
+          if (rx_fire) servo_fire(SERVO_AI, now);
+        }
       } else {
         d2 = (rx_move == 'L') ? -1 : (rx_move == 'R') ? 1 : 0;
         if (rx_age >= LINK_HOLD_MS) d2 = 0;

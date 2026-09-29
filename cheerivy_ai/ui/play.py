@@ -184,9 +184,26 @@ class SimTable:
         self.striker = None          # who struck last (the flow asks, for own goals)
         self.aim = {1: None, 2: None}          # (target x, start moving at)
         self.rest_until = None
+        self.debug = False
+        self.manual = {1: (0, 0.0), 2: (0, 0.0)}    # debug: (direction, until)
 
     def command(self, cmd, now):
         a = cmd.split()
+        if a[0] == "debug":
+            self.debug = a[1] == "on"
+            self.manual = {1: (0, 0.0), 2: (0, 0.0)}
+            return
+        if a[0] == "test":
+            p = int(a[1])
+            if a[2] in "LR":
+                self.manual[p] = (-1 if a[2] == "L" else 1, now + float(a[3]))
+            elif a[2] == "F":                        # strike: a ball right in front goes off
+                if abs(self.x - self.car[p]) <= CW / 2 + R and abs(self.y - LINE[p]) < 3:
+                    self.locked = False
+                    self._launch(p)
+            else:
+                self.manual[p] = (0, 0.0)
+            return
         if a[0] == "lock":
             self.locked = True
         elif a[0] == "unlock" and self.locked:
@@ -217,6 +234,12 @@ class SimTable:
     def step(self, dt, now, placer):
         self.placer = placer
         mid = (XL + XR) / 2
+        if self.debug:                               # debug: only the test moves drive the carriages
+            for p in (1, 2):
+                d, until = self.manual[p]
+                if now < until:
+                    self.car[p] = max(XL + CW / 2, min(XR - CW / 2, self.car[p] + d * CARRIAGE_SPEED * dt))
+            return self._frame(), None
         if self.locked:                              # ball waits in front of whoever restarts
             top = placer == 2
             self.x += (self.car[2 if top else 1] - self.x) * 0.15

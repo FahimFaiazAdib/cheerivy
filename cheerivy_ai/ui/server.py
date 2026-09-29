@@ -117,7 +117,7 @@ class Hub:
 
     def _publish(self):
         snap = {**self.flow.snapshot(), "arena": ARENA, **self.extra}
-        if self.board and self.flow.screen in ("prematch", "ready", "countdown", "live", "goal", "pause"):
+        if self.board and self.flow.screen in ("prematch", "ready", "countdown", "live", "goal", "pause", "debug"):
             snap["board"] = self.board
         d = json.dumps(snap, separators=(",", ":"))
         if d != self.data:
