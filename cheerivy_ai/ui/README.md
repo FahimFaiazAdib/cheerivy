@@ -27,7 +27,7 @@ The page is a fixed 1920×1080 stage, scaled to fit, so it looks the same on the
 | Player 1 | W A S D | Space | Q |
 | Player 2 | arrows | Enter | Backspace |
 
-`H` = both buttons held 3 s (pause) · `G` = goal for player 1 · `K` = goal for player 2 / the AI · `Tab` or `N` (or a joystick pushed forward / a button while the commentator talks) = skip the talk (straight to the kick-off / restart; the buzzer rule is always said) ·
+`H` = both buttons held 3 s (pause) · `G` = goal for player 1 · `K` = goal for player 2 / the AI · `Tab` or `N` (or pressing a joystick in while the commentator talks) = skip the talk (straight to the kick-off / restart; the buzzer rule is always said) ·
 `Esc` = home · `F1` = settings · `` ` `` = dev panel (LCD preview + robot commands) · `F` = fullscreen
 
 ## State the page receives (one JSON per change)
