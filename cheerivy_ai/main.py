@@ -13,6 +13,7 @@ Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (whil
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
        player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger
        m  robot speaker test (DFPlayer): crowd + a new commentary clip every 5 s; m again = stop
+       , / .  robot speaker volume down / up (0..30)
                                              /  test strike
 Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
        RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
@@ -137,6 +138,7 @@ def main():
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
     p1_servo, p1_asked = None, False      # player 1's servo angles, as reported by the robot
     sound_test, sound_next_t, sound_i = False, 0.0, 0
+    df_volume = 15
     sd_tracks = {}
     try:
         with open(os.path.join("show", "voice_bank", "sd_tracks.json")) as f:
@@ -253,10 +255,15 @@ def main():
             k = cv2.waitKey(1) & 0xFF
             if k == 255:
                 continue
+            if k in (ord(","), ord(".")) and not (show and show.phase == "NAMES"):
+                df_volume = max(0, min(30, df_volume + (2 if k == ord(".") else -2)))
+                link.send(f"V{df_volume};")
+                print(f"[sound] robot speaker volume {df_volume} / 30")
+                continue
             if k == ord("m") and not (show and show.phase == "NAMES"):
                 sound_test = not sound_test
                 if sound_test:
-                    link.send("V26;")
+                    link.send(f"V{df_volume};")
                     link.send(f"P{crowd_n};")
                     sound_next_t = time.time() + 2.0
                     print(f"[sound] test ON: crowd = /MP3/{crowd_n:04d}.mp3, then a clip every 5 s (m = stop)")
