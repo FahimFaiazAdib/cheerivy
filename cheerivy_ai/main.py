@@ -11,7 +11,7 @@ CHEERIVY — Vision AI (Layer B)
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
-       player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  strike angle -/+ 1
+       player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger
                                              /  test strike
 Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
        RIGHT-click the ball to lock the ball's colour (colours are set in config.py).
@@ -242,8 +242,10 @@ def main():
                 elif "rest" in p1:
                     if chr(k) in "[]":
                         link.send(f"H{max(0, min(180, p1['rest'] + (1 if k == ord(']') else -1)))};")
-                    else:
-                        link.send(f"J{max(0, min(180, p1['strike'] + (1 if k == ord('=') else -1)))};")
+                    else:                               # - smaller swing, = bigger swing
+                        toward_rest = 1 if p1["strike"] < p1["rest"] else -1
+                        step = toward_rest if k == ord("-") else -toward_rest
+                        link.send(f"J{max(0, min(180, p1['strike'] + step))};")
                 else:
                     link.send("U0;")                    # ask the robot for the current angles first
                     print("[servo] asking the robot for player 1's angles, press again")
