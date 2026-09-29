@@ -230,6 +230,10 @@ static const Note SND_LINK_UP[] = {{70, 6}, {50, 6}, {35, 10}};
 static const Note SND_LINK_DOWN[] = {{35, 6}, {50, 6}, {70, 10}};
 static const Note SND_SIREN[] = {{30, 4}, {70, 4}, {30, 4}, {70, 4}, {30, 4}, {70, 4}, {30, 4}, {70, 4}};
 static const Note SND_TICK[] = {{30, 3}};
+/* While a carriage is frozen the buzzer keeps beeping until the freeze ends:
+   low beeps = player 1 frozen, high beeps = the AI side frozen. */
+static const Note SND_FROZEN_HUMAN[] = {{70, 10}, {0, 8}};
+static const Note SND_FROZEN_AI[] = {{35, 10}, {0, 8}};
 static const Note SND_GOAL_HUMAN[] = {{62, 8}, {49, 8}, {41, 8}, {30, 30}};
 static const Note SND_GOAL_AI[] = {{41, 12}, {49, 12}, {62, 12}, {83, 30}};
 static const Note SND_END[] = {{62, 60}, {0, 10}, {41, 15}, {0, 5}, {41, 15}, {0, 5}, {41, 15}};
@@ -747,6 +751,12 @@ static void play_match(uint8_t game, uint8_t level) {
       rx_fire = rx_freeze = 0;          /* frozen: ignore queued actions */
     }
     motor_ai(ai_dir);
+
+    /* ---------------- FROZEN: beep until the freeze is over ---------------- */
+    if (!bz_seq) {                      /* after the siren (or any other sound) has finished */
+      if (now < human_frozen_until) PLAY(SND_FROZEN_HUMAN);
+      else if (now < ai_frozen_until) PLAY(SND_FROZEN_AI);
+    }
 
     /* ---------------- GOALS ---------------- */
     uint8_t g = goal_flags_take();

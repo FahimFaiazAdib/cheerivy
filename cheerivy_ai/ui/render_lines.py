@@ -85,6 +85,45 @@ def all_lines():
     return out
 
 
+MAX_CHARS = 120           # F5 splits longer text into pieces itself, and on the Mac (MPS) that crashes
+SENTENCE_GAP_S = 0.25
+
+
+def pieces(text):
+    """Whole sentences, joined while they fit in MAX_CHARS."""
+    out, cur = [], ""
+    for sent in re.findall(r"[^.!?]+[.!?]+", text) or [text]:
+        sent = sent.strip()
+        if cur and len(cur) + 1 + len(sent) > MAX_CHARS:
+            out.append(cur)
+            cur = sent
+        else:
+            cur = f"{cur} {sent}".strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def render_long(rb, f5, ref_wav, ref_text, text, speed, out):
+    """One model call per piece; pieces joined with a short breath."""
+    import numpy as np
+    import soundfile as sf
+    parts = pieces(text)
+    if len(parts) == 1:
+        rb.render_line(f5, ref_wav, ref_text, text, speed, 1, out)
+        return
+    audio, sr = [], 24000
+    for part in parts:
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        rb.render_line(f5, ref_wav, ref_text, part, speed, 1, tmp)
+        a, sr = sf.read(tmp)
+        os.remove(tmp)
+        if audio:
+            audio.append(np.zeros(int(sr * SENTENCE_GAP_S)))
+        audio.append(a if a.ndim == 1 else a[:, 0])
+    sf.write(out, np.concatenate(audio), sr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true", help="only list the lines")
@@ -117,8 +156,8 @@ def main():
         cfg = rb.TONE_CONFIG[tone]
         print(f"[{n}/{len(todo)}] {tone:6s} {key}  {text}")
         take = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-        rb.render_line(f5, os.path.join(rb.VOICE_REFS_DIR, cfg["ref_file"]), ref_texts.get(tone, ""),
-                       text, cfg["speed"], 1, take)
+        render_long(rb, f5, os.path.join(rb.VOICE_REFS_DIR, cfg["ref_file"]), ref_texts.get(tone, ""),
+                    text, cfg["speed"], take)
         stats = rb.post_process_audio(take, os.path.join(RENDERED_DIR, key + ".wav"), tone)
         os.remove(take)
         index[key] = {"text": text, "tone": tone, "duration_ms": stats["duration_ms"]}
