@@ -509,7 +509,7 @@ body.match-on.live-on #caption { bottom: 80px; }
 .cal-btns button { font: 800 24px/1 var(--display); letter-spacing: .1em; color: var(--ink); cursor: pointer;
   padding: 16px 18px; border-radius: 12px; background: var(--glass-hi); border: 2px solid var(--line-hi); }
 .cal-btns button.go { background: var(--ink); color: var(--bg); }
-.cal-btns button:disabled { opacity: .35; cursor: default; }
+.cal-btns button.dim { opacity: .45; }
 .cal-btns kbd { font: 600 16px/1 var(--mono); opacity: .6; margin-left: 6px; }
 .cal-pic { position: absolute; left: 700px; top: 110px; width: 1120px; height: 860px;
   display: grid; place-items: center; }

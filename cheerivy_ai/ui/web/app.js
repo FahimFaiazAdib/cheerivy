@@ -55,19 +55,27 @@ const MODE_LABEL = { ai: 'VS MACHINE', '2p': '2 PLAYERS', aivai: 'AI VS AI' };
 // ------------------------------------------------------------------ calibration clicks
 const CAL_STEPS = ['A corner of the wall behind <b class="t2">PLAYER 2 / THE AI</b>', 'The <b>other</b> corner of that same wall',
   'A corner of the wall behind <b class="t1">PLAYER 1</b>', 'The <b>other</b> corner of that same wall'];
-let calPts = [], calPing = null, calTimer = 0;
+let calPts = [], calPing = null, calTimer = 0, calShown = -1;
 const sendKey = key => fetch('/key', { method: 'POST', body: JSON.stringify({ key }) }).catch(() => {});
 const calUndo = () => { calPts.pop(); calDraw(); };
-const calSave = () => { if (calPts.length === 4) fetch('/calib', { method: 'POST', body: JSON.stringify({ points: calPts }) }).catch(() => {}); };
+function calSave() {                            // always clickable; says what happened
+  const step = document.querySelector('.cal-step');
+  if (calPts.length !== 4) { if (step) step.textContent = `CLICK ${4 - calPts.length} MORE CORNER${calPts.length === 3 ? '' : 'S'} FIRST`; return; }
+  if (step) step.textContent = 'SAVING…';
+  fetch('/calib', { method: 'POST', body: JSON.stringify({ points: calPts }) })
+    .then(r => { if (!r.ok) throw 0; })
+    .catch(() => { if (step) step.textContent = 'NOT SAVED: IS main.py RUNNING?'; });
+  setTimeout(() => { if (S && S.screen === 'calibrate' && step && document.body.contains(step)) step.textContent = 'STILL WAITING: PRESS SAVE AGAIN'; }, 4000);
+}
 const calCancel = () => sendKey('Escape');       // the game decides (no cancelling the very first calibration)
 function calDraw() {
   const el = document.querySelector('.cal'); if (!el) return;
   const img = el.querySelector('img'), svg = el.querySelector('svg'), w = img.naturalWidth, h = img.naturalHeight;
   el.classList.toggle('ready', w > 0);
   const step = el.querySelector('.cal-step');
-  if (step) setText(step, calPts.length < 4 ? `STEP ${calPts.length + 1} OF 4` : 'ALL 4 CLICKED · PRESS SAVE');
+  if (step && calPts.length !== calShown) { calShown = calPts.length; setText(step, calPts.length < 4 ? `STEP ${calPts.length + 1} OF 4` : 'ALL 4 CLICKED · PRESS SAVE'); }
   el.querySelectorAll('.cal-list li').forEach((li, i) => { li.classList.toggle('done', i < calPts.length); li.classList.toggle('now', i === calPts.length && S.calib === 'board'); });
-  const save = el.querySelector('[data-do=save]'); if (save) save.disabled = calPts.length !== 4;
+  const save = el.querySelector('[data-do=save]'); if (save) save.classList.toggle('dim', calPts.length !== 4);
   if (!w) return;
   const fitW = Math.round(w * Math.min(1120 / w, 860 / h)) + 'px';   // as big as the space allows
   if (img.style.width !== fitW) img.style.width = fitW;
@@ -210,7 +218,7 @@ const SCREENS = {
       const el = root.querySelector('.cal');
       if (!el || el.dataset.init) return;
       el.dataset.init = 1;
-      calPts = [];
+      calPts = []; calShown = -1;
       const img = el.querySelector('img');
       const act = { undo: calUndo, save: calSave, cancel: calCancel, done: () => sendKey('Escape') };
       el.querySelectorAll('[data-do]').forEach(b => b.onclick = () => act[b.dataset.do]());
