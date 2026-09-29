@@ -55,6 +55,7 @@ class Tracker:
         self.last_ball = None
         self.ball_mask = self.carriage_mask = None
         self.carriage_box = None
+        self.zones, self.zone_hit = {}, {}     # strike zones (see _strike_zones)
         self._field = None
 
     def field_mask(self, shape):
@@ -142,14 +143,14 @@ class Tracker:
             half = C.CARRIAGE_W / 2 + C.CARRIAGE_MASK_MARGIN
             cv2.rectangle(mask, (int((carriage_x - half) * s), 0),
                           (int((carriage_x + half) * s), int((C.CARRIAGE_DEPTH - 0.5) * s)), 0, -1)
-        # Hide the carriages' tape from the ball detector: only the tape itself (+ a little). Seen
-        # from the side, a raised tape looks shifted into the board, right where a slow ball sits in
-        # front of the carriage; hiding everything from the tape to the wall hid that ball too.
-        g = int(C.TAPE_MASK_MARGIN * s)
-        for box in (self.carriage_box, self.p1_box if self.find_p1 else None):
-            if box is not None:
-                x, y, w, h = box
-                cv2.rectangle(mask, (x - g, y - g), (x + w + g, y + h + g), 0, -1)
+        if self.carriage_box is not None:  # wherever the tape appears, the carriage is there too
+            x, y, w, h = self.carriage_box
+            g = int(C.CARRIAGE_MASK_MARGIN * s)
+            cv2.rectangle(mask, (x - g, 0), (x + w + g, y + h + g), 0, -1)
+        if self.find_p1 and self.p1_box is not None:   # player 1's carriage: hide it like the AI's
+            x, y, w, h = self.p1_box
+            g = int(C.CARRIAGE_MASK_MARGIN * s)
+            cv2.rectangle(mask, (x - g, y - g), (x + w + g, mask.shape[0]), 0, -1)
         # The human's carriage has black parts; the AI doesn't need the ball there.
         mask[int((C.ARENA_H - C.CARRIAGE_DEPTH + 0.5) * s):, :] = 0
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
@@ -184,4 +185,27 @@ class Tracker:
         p1_x = self.find_carriage(hsv, player1=True) if self.find_p1 else None
         if not self.find_p1:
             self.p1_box = None
+        self._strike_zones(hsv)
         return self.find_ball(hsv, carriage_x), carriage_x, p1_x
+
+    def _strike_zones(self, hsv):
+        """The thin band in front of each carriage's tape, and whether the ball is in it.
+        zones[2] = the AI side's (top), zones[1] = player 1's (bottom): (x, y, w, h) in pixels."""
+        s = C.PX_PER_CM
+        depth, pad = int(C.STRIKE_ZONE_CM * s), int(C.STRIKE_ZONE_PAD_CM * s)
+        self.zones, self.zone_hit = {}, {}
+        ball = None
+        for p, box in ((2, self.carriage_box), (1, self.p1_box)):
+            if box is None:
+                continue
+            x, y, w, h = box
+            y0 = y + h if p == 2 else y - depth           # in front of the tape: towards the middle
+            x0, y0 = max(0, x - pad), max(0, y0)
+            x1, y1 = min(hsv.shape[1], x + w + pad), min(hsv.shape[0], y0 + depth)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            self.zones[p] = (x0, y0, x1 - x0, y1 - y0)
+            if ball is None:
+                ball = (cv2.inRange(hsv, (0, 0, 0), (180, 255, C.BALL_MAX_V)) if self.ball_ranges is None
+                        else self._color_mask(hsv, self.ball_ranges))
+            self.zone_hit[p] = cv2.countNonZero(ball[y0:y1, x0:x1]) >= C.STRIKE_ZONE_MIN_CM2 * s * s

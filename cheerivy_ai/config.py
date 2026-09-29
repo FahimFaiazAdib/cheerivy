@@ -16,11 +16,6 @@ BASE_W = 38.0           # measured: inner width of the straight AI baseline wall
 CARRIAGE_GAP = 38.0     # measured: AI carriage front face -> P1 carriage front face
 CARRIAGE_DEPTH = 4.0    # measured: baseline wall -> carriage front face
 CARRIAGE_W = 10.0       # measured: carriage width (left-right)
-# The striker is not always centred under the tape the camera follows (and from the side a raised
-# tape looks shifted). striker centre = tape centre + this, in cm (+ = to the right in the picture).
-# Starting values from a photo of the robot; tune them in Settings > Camera & AI.
-STRIKER_OFFSET_AI_CM = -1.0   # the green (AI side) striker is closer to its tape than the blue one
-STRIKER_OFFSET_P1_CM = -2.0
 ARENA_H = CARRIAGE_GAP + 2 * CARRIAGE_DEPTH   # baseline to baseline
 CHAMFER_DX = 0.0        # the board is a plain rectangle now (was 9.0 on the old octagon board)
 CHAMFER_DY = 0.0        # (was 10.0)
@@ -34,8 +29,7 @@ CARRIAGE_MIN_X = X0 + CARRIAGE_W / 2           # carriage centre travel limits
 CARRIAGE_MAX_X = X0 + BASE_W - CARRIAGE_W / 2
 
 PX_PER_CM = 10          # resolution of the top-down (warped) image
-VIEW_MARGIN_CM = 7.0    # the game page shows this much around the calibrated board (rails, carriages,
-                        # walls); the AI still measures only the board itself
+VIEW_MARGIN_CM = 0.0    # extra picture shown around the calibrated board on the game page (0 = none)
 
 # ---------------------------------------------------------------- camera
 CAMERA_INDEX = 0        # 0 = Iriun on this Mac (1 = FaceTime). None = auto-pick
@@ -68,7 +62,12 @@ CARRIAGE_BAND_CM = CARRIAGE_DEPTH + 8.0  # search for the carriage tape this clo
                                          # (generous: tape sits ABOVE the floor, so an angled camera shifts it)
 CARRIAGE_MIN_AREA_CM2 = 1.0
 CARRIAGE_MASK_MARGIN = 1.5  # hide carriage footprint (+ this) from the ball detector
-TAPE_MASK_MARGIN = 0.5      # hide each carriage's tape (+ this) from the ball detector
+# STRIKE ZONES: a thin band just in front of each carriage's tape (as the camera sees it). A ball in
+# it, moving or still, is struck at once (checked on its own, apart from the ball tracking).
+STRIKE_ZONE_CM = 3.5        # depth of the band, from the tape's front edge towards the middle
+STRIKE_ZONE_PAD_CM = 1.0    # the band is this much wider than the tape on each side
+STRIKE_ZONE_MIN_CM2 = 1.5   # this much ball colour inside the band = the ball is there
+STRIKE_ZONE_COOLDOWN_S = 0.5
 WALL_MASK_MARGIN = 0.5      # ignore this much next to the walls (shadows / wall edges)
 
 # ---------------------------------------------------------------- prediction
@@ -90,21 +89,19 @@ SIM_SLOPE = (-6.0, 6.0)    # simulator only: (AI half, P1 half); sheet under the
 
 # ---------------------------------------------------------------- control
 DEADBAND_CM = 1.5       # stop when |target - carriage| below this
+IDLE_ZONE_CM = 8.0      # no shot coming: stay put anywhere within this of the middle (else come back to its edge)
 HYSTERESIS_CM = 1.0     # extra margin before starting to move again
 MOTOR_SPEED_CM_S = 30.0 # first guess of the carriage speed; the AI measures the real one while playing
 MIN_MOVE_S = 0.04       # shortest drive pulse
 MAX_MOVE_S = 0.6        # longest drive before looking again
 SETTLE_S = 0.3          # after each move: wait this long so the camera shows where the carriage stopped
-SETTLE_SHOT_S = 0.1     # ... but only this long while a shot is coming (no time to wait and see)
-REPLAN_CM = 3.0         # the target moved this far during a move (new prediction): re-plan at once
 WRONG_WAY_CM = 2.0      # a move that went this far the wrong way -> swap L/R automatically
 STALL_MOVE_CM = 0.7     # a move shorter than this near a rail end = the carriage is at the end
 RAIL_MARGIN_CM = 1.0    # never aim closer than this to a rail end
 FIRE_REACH_CM = CARRIAGE_W / 2  # flipper covers carriage_x ± this
 FIRE_LEAD_S = 0.12      # fire this long before predicted arrival (servo swing time)
 FIRE_COOLDOWN_S = 0.6
-NEAR_BALL_CM = 6.0      # a slow ball this close in front of the AI line: go to it and hit it
-SLOW_BALL_CM_S = 12.0   # ... "slow" = slower than this (even if the tilt says it may still roll in)
+NEAR_BALL_CM = 4.0      # a slow ball this close in front of the AI line: go to it and hit it
 HEARTBEAT_S = 0.1       # resend current command this often (firmware falls back to Mirror AI after 400 ms)
 ROBOT_VOLUME = 14      # robot speaker (DFPlayer) volume 0..30; the PAM8610 amp has no knob, so set it here
 CAMERA_GOALS = True     # count goals from the camera (turns itself off when the laser sensors report one)

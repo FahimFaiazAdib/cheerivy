@@ -177,6 +177,18 @@ const Board = (() => {
       if (b.p1_x != null) carriage(b.p1_x, false, '#ff5b2e', fz['1'] && fz['1'].frozen > 0, t);
     }
 
+    // strike zones: the thin band in front of each carriage; lit while the ball is in it (= strike now)
+    Object.entries(b.zones || {}).forEach(([p, z]) => {
+      if (!z) return;
+      const col = p === '1' ? '255,91,46' : '31,213,245', hit = b.zone_hit && b.zone_hit[p];
+      const [a, y0] = px(z[0], z[1]), [c, y1] = px(z[0] + z[2], z[1] + z[3]);
+      ctx.save();
+      ctx.fillStyle = `rgba(${col},${hit ? .45 : .12})`; ctx.fillRect(a, y0, c - a, y1 - y0);
+      ctx.setLineDash([6, 6]); ctx.lineWidth = 2; ctx.strokeStyle = `rgba(${col},${hit ? 1 : .6})`;
+      ctx.strokeRect(a, y0, c - a, y1 - y0);
+      ctx.restore();
+    });
+
     // predicted paths + landing reticles: the AI's (cool), and player 1's AI in AI vs AI (warm)
     [[b.path, '#1fd5f5'], [b.path1, '#ff5b2e']].forEach(([path, col]) => {
       if (!path || path.length < 2) return;

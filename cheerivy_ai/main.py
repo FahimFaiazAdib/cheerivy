@@ -201,7 +201,7 @@ def main():
 
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()
-    last_off = (0.0, 0.0)
+    zone_fired = {1: 0.0, 2: 0.0}
 
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
     if not args.no_show and not live:
@@ -251,19 +251,6 @@ def main():
             flat = cal.warp(frame)
             flat_clean = flat.copy() if (show or live) else None
             ball, carriage_x, p1_x = tracker.process(flat)
-            # the tape the camera follows -> the striker (Settings > Camera & AI > Striker offset)
-            if live:
-                off = (live.flow.settings["off_ai"], live.flow.settings["off_p1"])
-            else:                                   # (the simulator's strikers sit under the tape)
-                off = (0.0, 0.0) if args.sim else (C.STRIKER_OFFSET_AI_CM, C.STRIKER_OFFSET_P1_CM)
-            if off != last_off:                     # the rail limits move with it
-                for c, d in ((ctrl, off[0] - last_off[0]), (ctrl1, off[1] - last_off[1])):
-                    c.rail_lo, c.rail_hi = c.rail_lo + d, c.rail_hi + d
-                last_off = off
-            if carriage_x is not None:
-                carriage_x += off[0]
-            if p1_x is not None:
-                p1_x += off[1]
             if ball:
                 pred.update(stamp, *ball)
             elif pred.hist and stamp - pred.hist[-1][0] > 0.25:
@@ -327,6 +314,8 @@ def main():
                         live.sync_swaps()
                 if paused:
                     cmd1, fire1 = "S", False
+                elif tracker.zone_hit.get(1) and now - zone_fired[1] > C.STRIKE_ZONE_COOLDOWN_S:
+                    fire1, zone_fired[1] = True, now     # the ball is in player 1's strike zone
                 link.move1(cmd1)
                 if fire1:
                     link.send("G")
@@ -347,6 +336,8 @@ def main():
                               f"rest {a['rest']}°, strike {a['strike']}°")
                     else:
                         link.send(f"{c_test}0;")        # the robot replies "P<n>SERVO <rest> <strike>"
+            if not paused and not debug and tracker.zone_hit.get(2) and now - zone_fired[2] > C.STRIKE_ZONE_COOLDOWN_S:
+                fire, zone_fired[2] = True, now          # the ball is in the AI side's strike zone
             if fire:
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
@@ -415,11 +406,13 @@ def main():
                          "path": [[r(x), r(y)] for x, y in pred.path()],
                          "ai_x": None if carriage_x is None else r(carriage_x),
                          "ai_box": box_cm(tracker.carriage_box),
+                         "zones": {str(p): box_cm(z) for p, z in tracker.zones.items()},
+                         "zone_hit": {str(p): bool(v) for p, v in tracker.zone_hit.items()},
                          "p1_box": box_cm(tracker.p1_box) if aivai else None,
                          "p1_x": None if (p1_x is None or not aivai) else r(p1_x),
                          "path1": [[r(x), r(C.ARENA_H - y)] for x, y in pred1.path()] if aivai else []}
                 live.frame(stamp, flat_clean, board, pred.slope,
-                           view=lambda: cal.warp_view(frame, C.VIEW_MARGIN_CM))
+                           view=(lambda: cal.warp_view(frame, C.VIEW_MARGIN_CM)) if C.VIEW_MARGIN_CM else None)
 
             if show:
                 show.link_state = link.mode
