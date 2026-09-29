@@ -91,7 +91,7 @@ static const uint16_t MIRROR_DELAY_MS[3] = {300, 180, 80};  /* easy, medium, har
 #define AI_REST_DEG            87
 #define AI_STRIKE_DEG          20
 #define HUMAN_REST_DEG         90
-#define HUMAN_STRIKE_DEG       25
+#define HUMAN_STRIKE_DEG       23    /* 67° swing, the same as the AI servo */
 
 /* MG90S: 0.10 s / 60° at 4.8-5 V = 1.6 ms per degree (0.08 s / 60° at 6 V -> use 13).     */
 #define SERVO_MS_PER_DEG_X10   16
