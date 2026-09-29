@@ -11,7 +11,8 @@ CHEERIVY — Vision AI (Layer B)
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
-       player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger
+       servo tuning (saved on the robot):    p  switch player 1 <-> player 2
+             [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger    /  test strike
        m  robot speaker test (DFPlayer): a commentary clip from /MP3 every 5 s; m again = stop
        n  DFPlayer "next track" (same as touching its IO2 pin to GND)
        , / .  robot speaker volume down / up (0..30)
@@ -137,7 +138,9 @@ def main():
         show_phase = show.phase
 
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
-    p1_servo, p1_asked = None, False      # player 1's servo angles, as reported by the robot
+    servos, p1_asked = {1: None, 2: None}, False   # each player's servo angles, as reported by the robot
+    tune = 1                                        # which player's servo the [ ] - = / keys change
+    TUNE_CMD = {1: ("H", "J", "U"), 2: ("Q", "W", "T")}   # rest, strike, test/report
     sound_test, sound_next_t, sound_i = False, 0.0, 0
     df_volume = C.ROBOT_VOLUME
     sd_tracks = {}
@@ -189,15 +192,19 @@ def main():
                 p1_asked = True
                 link.send(f"V{df_volume};")                # robot speaker volume from config.py
                 link.send("U0;")                        # the robot replies "P1SERVO <rest> <strike>"
+                link.send("T0;")                        # ... and "P2SERVO <rest> <strike>"
             if fire:
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
             for line in mcu_lines:
-                if line.startswith("P1SERVO"):
+                if line.startswith(("P1SERVO", "P2SERVO")):
                     try:
                         _, r, s_ = line.split()
-                        p1_servo = {"rest": int(r), "strike": int(s_)}
-                        print(f"[servo] player 1: rest {r}°, strike {s_}°, swing {abs(int(r) - int(s_))}° (saved on the robot)")
+                        who = int(line[1])
+                        servos[who] = {"rest": int(r), "strike": int(s_)}
+                        mark = "  <- [ ] - = / tune this one" if who == tune else ""
+                        print(f"[servo] player {who}: rest {r}°, strike {s_}°, swing {abs(int(r) - int(s_))}° "
+                              f"(saved on the robot){mark}")
                     except ValueError:
                         pass
                     continue
@@ -277,20 +284,26 @@ def main():
                     link.send("P0;")
                     print("[sound] test OFF")
                 continue
+            if k == ord("p") and not (show and show.phase == "NAMES"):
+                tune = 2 if tune == 1 else 1
+                link.send(f"{TUNE_CMD[tune][2]}0;")   # the robot replies with that servo's angles
+                print(f"[servo] the [ ] - = / keys now tune PLAYER {tune}'s servo")
+                continue
             if chr(k) in "[]-=/" and not (show and show.phase == "NAMES"):
-                p1 = p1_servo or {}
+                sv = servos[tune] or {}
+                c_rest, c_strike, c_test = TUNE_CMD[tune]
                 if chr(k) == "/":
-                    link.send("U1;")
-                elif "rest" in p1:
+                    link.send(f"{c_test}1;")
+                elif "rest" in sv:
                     if chr(k) in "[]":
-                        link.send(f"H{max(0, min(180, p1['rest'] + (1 if k == ord(']') else -1)))};")
+                        link.send(f"{c_rest}{max(0, min(180, sv['rest'] + (1 if k == ord(']') else -1)))};")
                     else:                               # - smaller swing, = bigger swing
-                        toward_rest = 1 if p1["strike"] < p1["rest"] else -1
+                        toward_rest = 1 if sv["strike"] < sv["rest"] else -1
                         step = toward_rest if k == ord("-") else -toward_rest
-                        link.send(f"J{max(0, min(180, p1['strike'] + step))};")
+                        link.send(f"{c_strike}{max(0, min(180, sv['strike'] + step))};")
                 else:
-                    link.send("U0;")                    # ask the robot for the current angles first
-                    print("[servo] asking the robot for player 1's angles, press again")
+                    link.send(f"{c_test}0;")            # ask the robot for the current angles first
+                    print(f"[servo] asking the robot for player {tune}'s angles, press again")
                 continue
             if show and show.on_key(k):
                 continue

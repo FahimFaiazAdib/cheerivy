@@ -103,7 +103,8 @@ static const uint16_t MIRROR_DELAY_MS[3] = {300, 180, 80};  /* easy, medium, har
 #define SERVO_US(deg)          (600 + (uint16_t)(deg) * 10)
 #define SWING_DEG(a, b)        ((a) > (b) ? (a) - (b) : (b) - (a))
 #define TRAVEL_MS(a, b)        (SWING_DEG(a, b) * SERVO_MS_PER_DEG_X10 / 10 + SERVO_SETTLE_MS)
-#define AI_TRAVEL_MS           TRAVEL_MS(AI_REST_DEG, AI_STRIKE_DEG)        /* ~122 ms */
+static uint8_t ai_rest = AI_REST_DEG, ai_strike = AI_STRIKE_DEG;      /* tunable too, like player 1's */
+#define AI_TRAVEL_MS           TRAVEL_MS(ai_rest, ai_strike)             /* ~122 ms for 67° */
 /* Player 1's angles can be changed live from the laptop ("H<deg>;" rest, "J<deg>;" strike) and
    are kept in EEPROM, so they survive power-off. HUMAN_REST_DEG / HUMAN_STRIKE_DEG are only the
    defaults for a fresh chip. */
@@ -142,7 +143,11 @@ static void servo_init(void) {
   TCCR1A = (1 << COM1A1) | (1 << COM1B1) | (1 << WGM11);
   TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS11);
   ICR1 = SERVO_FRAME_US;
-  servo_write(SERVO_AI, SERVO_US(AI_REST_DEG));
+  if (eeprom_read_byte((uint8_t *)3) == 0xC6) {        /* player 2 angles saved from the laptop */
+    uint8_t r = eeprom_read_byte((uint8_t *)4), k = eeprom_read_byte((uint8_t *)5);
+    if (r <= 180 && k <= 180) { ai_rest = r; ai_strike = k; }
+  }
+  servo_write(SERVO_AI, SERVO_US(ai_rest));
   if (eeprom_read_byte((uint8_t *)0) == 0xC5) {        /* angles saved from the laptop */
     uint8_t r = eeprom_read_byte((uint8_t *)1), k = eeprom_read_byte((uint8_t *)2);
     if (r <= 180 && k <= 180) { human_rest = r; human_strike = k; }
@@ -155,7 +160,7 @@ static uint8_t servo_ready(uint8_t s, uint32_t now) { return now >= servo_ready_
 static void servo_fire(uint8_t s, uint32_t now) {
   if (!servo_ready(s, now)) return;
   uint16_t travel = (s == SERVO_AI) ? AI_TRAVEL_MS : HUMAN_TRAVEL_MS;
-  servo_write(s, SERVO_US(s == SERVO_AI ? AI_STRIKE_DEG : human_strike));
+  servo_write(s, SERVO_US(s == SERVO_AI ? ai_strike : human_strike));
   servo_out[s] = 1;
   servo_back_at[s] = now + travel;
   servo_ready_at[s] = now + 2UL * travel;
@@ -164,7 +169,7 @@ static void servo_fire(uint8_t s, uint32_t now) {
 static void servo_update(uint32_t now) {
   for (uint8_t s = 0; s < 2; s++) {
     if (servo_out[s] && now >= servo_back_at[s]) {
-      servo_write(s, SERVO_US(s == SERVO_AI ? AI_REST_DEG : human_rest));
+      servo_write(s, SERVO_US(s == SERVO_AI ? ai_rest : human_rest));
       servo_out[s] = 0;
     }
   }
@@ -289,7 +294,7 @@ static volatile uint16_t df_play_req;   /* track + 1 (0 = nothing waiting) */
 static volatile uint16_t df_adv_req;    /* advert + 1 */
 static volatile uint8_t df_raw_req;     /* raw command + 1 */
 static volatile uint8_t df_vol_req;     /* volume + 1 */
-static volatile uint8_t h_rest_req, h_strike_req, h_test_req;   /* player 1 servo tuning, value + 1 */
+static volatile uint8_t tune_rest_req[2], tune_strike_req[2], tune_test_req[2];   /* [SERVO_AI / SERVO_HUMAN], value + 1 */
 static uint8_t df_booted;
 
 /* 9600 baud = 104.2 us per bit. The loop itself takes ~1.3 us per bit at 8 MHz, so the delay is
@@ -331,32 +336,37 @@ static void servo_fire(uint8_t s, uint32_t now);
 static void uart_puts(const char *s);
 static void uart_putu(uint16_t v);
 
-/* Player 1 servo tuning from the laptop: "H<deg>;" rest, "J<deg>;" strike, "U1;" test strike,
-   "U0;" just report.
-   New angles are used at once, saved to EEPROM and reported back as "P1SERVO <rest> <strike>". */
-static void human_servo_tuning(uint32_t now) {
+/* Servo tuning from the laptop, for both strikers:
+     player 1 (human side):  "H<deg>;" rest   "J<deg>;" strike   "U1;" test strike   "U0;" report
+     player 2 (AI side):     "Q<deg>;" rest   "W<deg>;" strike   "T1;" test strike   "T0;" report
+   New angles are used at once, saved to EEPROM and reported back as "P1SERVO <rest> <strike>"
+   or "P2SERVO <rest> <strike>". */
+static void servo_tuning(uint8_t s, uint32_t now) {
   uint8_t r, k, t;
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    r = h_rest_req; h_rest_req = 0;
-    k = h_strike_req; h_strike_req = 0;
-    t = h_test_req; h_test_req = 0;
+    r = tune_rest_req[s]; tune_rest_req[s] = 0;
+    k = tune_strike_req[s]; tune_strike_req[s] = 0;
+    t = tune_test_req[s]; tune_test_req[s] = 0;
   }
+  uint8_t *rest = (s == SERVO_HUMAN) ? &human_rest : &ai_rest;
+  uint8_t *strike = (s == SERVO_HUMAN) ? &human_strike : &ai_strike;
+  uint8_t base = (s == SERVO_HUMAN) ? 0 : 3;          /* EEPROM: magic, rest, strike */
   if (r || k) {
-    if (r) human_rest = r - 1;
-    if (k) human_strike = k - 1;
-    if (!servo_out[SERVO_HUMAN]) servo_write(SERVO_HUMAN, SERVO_US(human_rest));
-    eeprom_update_byte((uint8_t *)1, human_rest);
-    eeprom_update_byte((uint8_t *)2, human_strike);
-    eeprom_update_byte((uint8_t *)0, 0xC5);
+    if (r) *rest = r - 1;
+    if (k) *strike = k - 1;
+    if (!servo_out[s]) servo_write(s, SERVO_US(*rest));
+    eeprom_update_byte((uint8_t *)(uint16_t)(base + 1), *rest);
+    eeprom_update_byte((uint8_t *)(uint16_t)(base + 2), *strike);
+    eeprom_update_byte((uint8_t *)(uint16_t)base, s == SERVO_HUMAN ? 0xC5 : 0xC6);
   }
   if (r || k || t) {
-    uart_puts("P1SERVO ");
-    uart_putu(human_rest);
+    uart_puts(s == SERVO_HUMAN ? "P1SERVO " : "P2SERVO ");
+    uart_putu(*rest);
     uart_puts(" ");
-    uart_putu(human_strike);
+    uart_putu(*strike);
     uart_puts("\n");
   }
-  if (t == 2) servo_fire(SERVO_HUMAN, now);
+  if (t == 2) servo_fire(s, now);
 }
 
 static void df_update(uint32_t now) {   /* called from the main loops (via buzz_update) */
@@ -378,7 +388,8 @@ static void df_update(uint32_t now) {   /* called from the main loops (via buzz_
   else if (p) df_send(0x12, p - 1);                 /* play /MP3/<n>.mp3 */
   if (a == 1) df_send(0x15, 0);                     /* "A0;" = stop the advert, back to the main track */
   else if (a) df_send(0x13, a - 1);                 /* play /ADVERT/<n>.mp3 over the main track */
-  human_servo_tuning(now);
+  servo_tuning(SERVO_HUMAN, now);
+  servo_tuning(SERVO_AI, now);
 }
 
 /* ============================================================== UART / HC-05 */
@@ -408,16 +419,20 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
       else if (df_cmd == 'V') df_vol_req = df_num + 1;
       else if (df_cmd == 'X') { if (df_num < 255) df_raw_req = df_num + 1; }
       else if (df_num <= 180) {
-        if (df_cmd == 'H') h_rest_req = df_num + 1;
-        else if (df_cmd == 'J') h_strike_req = df_num + 1;
-        else h_test_req = df_num + 1;                    /* 'U': "U0;" report, "U1;" test strike */
+        if (df_cmd == 'H') tune_rest_req[SERVO_HUMAN] = df_num + 1;
+        else if (df_cmd == 'J') tune_strike_req[SERVO_HUMAN] = df_num + 1;
+        else if (df_cmd == 'U') tune_test_req[SERVO_HUMAN] = df_num + 1;
+        else if (df_cmd == 'Q') tune_rest_req[SERVO_AI] = df_num + 1;
+        else if (df_cmd == 'W') tune_strike_req[SERVO_AI] = df_num + 1;
+        else tune_test_req[SERVO_AI] = df_num + 1;       /* 'T' */
       }
     }
     df_cmd = 0;
     if (c == ';') return;               /* anything else: a lost ';' — treat c as a normal byte */
   }
   switch (c) {
-    case 'P': case 'A': case 'V': case 'X': case 'H': case 'J': case 'U': df_cmd = c; df_num = 0; return;
+    case 'P': case 'A': case 'V': case 'X': case 'H': case 'J': case 'U': case 'Q': case 'W': case 'T':
+      df_cmd = c; df_num = 0; return;
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
     case 'Z': rx_freeze = 1; break;
