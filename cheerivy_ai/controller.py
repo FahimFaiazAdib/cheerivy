@@ -26,6 +26,9 @@ class Controller:
         self.motor_speed = C.MOTOR_SPEED_CM_S   # learned while playing
         self.swap_request = False                # set when the carriage keeps moving the wrong way
         self._move_cmd, self._move_end, self._wait_end, self._move_from = "S", 0.0, 0.0, None
+        self._move_target = self.target
+        self._no_learn_until = 0.0
+        self._stall = None                       # (direction, x) of the last drive that didn't move
 
     def set_difficulty(self, level):
         self.level = level
@@ -41,7 +44,12 @@ class Controller:
     def update(self, predictor, carriage_x, now=None):
         """Returns (move_cmd, fire: bool, status_text)."""
         now = now or time.time()
-        hit = predictor.intercept()
+        pos = predictor.position
+        # A slow ball right in front: go and hit it, even if the tilt says it may still roll in by
+        # itself (it can stop short, and then waiting for it means waiting for ever).
+        near_slow = (pos is not None and pos[1] <= C.AI_LINE_Y + C.NEAR_BALL_CM
+                     and (predictor.vx ** 2 + predictor.vy ** 2) ** 0.5 < C.SLOW_BALL_CM_S)
+        hit = None if near_slow else predictor.intercept()
         if hit is not None:
             x_hit, t_hit = hit
             self._new_shot()
@@ -50,7 +58,6 @@ class Controller:
         else:
             x_hit = t_hit = None
             self._in_shot = False
-            pos = predictor.position
             near = pos is not None and pos[1] <= C.AI_LINE_Y + C.NEAR_BALL_CM
             if near:
                 # Slow or resting ball right in front: go to it (it's not coming by itself).
@@ -85,6 +92,12 @@ class Controller:
         # always overshoots (a full-speed carriage travels speed x delay before the stop lands).
         # Instead: drive for distance / motor speed seconds, stop, wait until the camera shows where
         # it really ended up, correct. Start and stop are delayed equally, so the timing holds.
+        if now < self._move_end and abs(self.target - self._move_target) > C.REPLAN_CM:
+            # The prediction changed a lot mid-move (a bounce, a better estimate): don't finish the
+            # old move, plan again from here. (Its timing no longer measures the motor speed.)
+            self._move_end = self._wait_end = now
+            self._move_from = None
+            self._no_learn_until = now + C.SETTLE_S     # it's still coasting from the old command
         if now < self._move_end:
             cmd = self._move_cmd
         elif now < self._wait_end:
@@ -95,11 +108,18 @@ class Controller:
                 moved = (carriage_x - x_from) * (1 if d == "R" else -1)
                 if dur >= 0.06 and moved < C.STALL_MOVE_CM and (
                         carriage_x > self.centre + 5 if d == "R" else carriage_x < self.centre - 5):
-                    if d == "R":                       # drove but didn't move: that's the real rail end
-                        self.rail_hi = carriage_x
+                    # drove but didn't move: the rail end, if it happens twice at the same spot
+                    # (once can be the camera lagging behind)
+                    seen = self._stall
+                    if seen and seen[0] == d and abs(seen[1] - carriage_x) < 1.5:
+                        if d == "R":
+                            self.rail_hi = carriage_x
+                        else:
+                            self.rail_lo = carriage_x
+                        self._stall = None
+                        print(f"[ai] rail end at {carriage_x:.1f} cm -> rail {self.rail_lo:.1f} .. {self.rail_hi:.1f}")
                     else:
-                        self.rail_lo = carriage_x
-                    print(f"[ai] rail end at {carriage_x:.1f} cm -> rail {self.rail_lo:.1f} .. {self.rail_hi:.1f}")
+                        self._stall = (d, carriage_x)
                 elif dur >= 0.08 and moved > C.STALL_MOVE_CM:
                     v = min(max(moved / dur, 5.0), 200.0)
                     self.motor_speed = 0.6 * self.motor_speed + 0.4 * v
@@ -118,8 +138,13 @@ class Controller:
                 dur = min(max(abs(err) / self.motor_speed, C.MIN_MOVE_S), C.MAX_MOVE_S)
                 self._move_cmd = cmd
                 self._move_end = now + dur
-                self._wait_end = self._move_end + C.SETTLE_S
-                self._move_from = (carriage_x, dur, cmd)
+                hurry = x_hit is not None
+                self._wait_end = self._move_end + (C.SETTLE_SHOT_S if hurry else C.SETTLE_S)
+                self._move_target = self.target
+                # learn the rail ends / motor speed only from moves that started at rest and that
+                # the camera had time to see end
+                clean = not hurry and now >= self._no_learn_until and self.moving == "S"
+                self._move_from = (carriage_x, dur, cmd) if clean else None
         self.moving = cmd
 
         fire = (x_hit is not None and self._will_fire

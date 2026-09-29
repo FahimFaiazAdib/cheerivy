@@ -142,14 +142,14 @@ class Tracker:
             half = C.CARRIAGE_W / 2 + C.CARRIAGE_MASK_MARGIN
             cv2.rectangle(mask, (int((carriage_x - half) * s), 0),
                           (int((carriage_x + half) * s), int((C.CARRIAGE_DEPTH - 0.5) * s)), 0, -1)
-        if self.carriage_box is not None:  # wherever the tape appears, the carriage is there too
-            x, y, w, h = self.carriage_box
-            g = int(C.CARRIAGE_MASK_MARGIN * s)
-            cv2.rectangle(mask, (x - g, 0), (x + w + g, y + h + g), 0, -1)
-        if self.find_p1 and self.p1_box is not None:   # player 1's carriage: hide it like the AI's
-            x, y, w, h = self.p1_box
-            g = int(C.CARRIAGE_MASK_MARGIN * s)
-            cv2.rectangle(mask, (x - g, y - g), (x + w + g, mask.shape[0]), 0, -1)
+        # Hide the carriages' tape from the ball detector: only the tape itself (+ a little). Seen
+        # from the side, a raised tape looks shifted into the board, right where a slow ball sits in
+        # front of the carriage; hiding everything from the tape to the wall hid that ball too.
+        g = int(C.TAPE_MASK_MARGIN * s)
+        for box in (self.carriage_box, self.p1_box if self.find_p1 else None):
+            if box is not None:
+                x, y, w, h = box
+                cv2.rectangle(mask, (x - g, y - g), (x + w + g, y + h + g), 0, -1)
         # The human's carriage has black parts; the AI doesn't need the ball there.
         mask[int((C.ARENA_H - C.CARRIAGE_DEPTH + 0.5) * s):, :] = 0
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))

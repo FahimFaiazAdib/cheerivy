@@ -63,6 +63,7 @@ CARRIAGE_BAND_CM = CARRIAGE_DEPTH + 8.0  # search for the carriage tape this clo
                                          # (generous: tape sits ABOVE the floor, so an angled camera shifts it)
 CARRIAGE_MIN_AREA_CM2 = 1.0
 CARRIAGE_MASK_MARGIN = 1.5  # hide carriage footprint (+ this) from the ball detector
+TAPE_MASK_MARGIN = 0.5      # hide each carriage's tape (+ this) from the ball detector
 WALL_MASK_MARGIN = 0.5      # ignore this much next to the walls (shadows / wall edges)
 
 # ---------------------------------------------------------------- prediction
@@ -89,13 +90,16 @@ MOTOR_SPEED_CM_S = 30.0 # first guess of the carriage speed; the AI measures the
 MIN_MOVE_S = 0.04       # shortest drive pulse
 MAX_MOVE_S = 0.6        # longest drive before looking again
 SETTLE_S = 0.3          # after each move: wait this long so the camera shows where the carriage stopped
+SETTLE_SHOT_S = 0.1     # ... but only this long while a shot is coming (no time to wait and see)
+REPLAN_CM = 3.0         # the target moved this far during a move (new prediction): re-plan at once
 WRONG_WAY_CM = 2.0      # a move that went this far the wrong way -> swap L/R automatically
 STALL_MOVE_CM = 0.7     # a move shorter than this near a rail end = the carriage is at the end
 RAIL_MARGIN_CM = 1.0    # never aim closer than this to a rail end
 FIRE_REACH_CM = CARRIAGE_W / 2  # flipper covers carriage_x ± this
 FIRE_LEAD_S = 0.12      # fire this long before predicted arrival (servo swing time)
 FIRE_COOLDOWN_S = 0.6
-NEAR_BALL_CM = 4.0      # a slow ball this close in front of the AI line: go to it and hit it
+NEAR_BALL_CM = 6.0      # a slow ball this close in front of the AI line: go to it and hit it
+SLOW_BALL_CM_S = 12.0   # ... "slow" = slower than this (even if the tilt says it may still roll in)
 HEARTBEAT_S = 0.1       # resend current command this often (firmware falls back to Mirror AI after 400 ms)
 ROBOT_VOLUME = 14      # robot speaker (DFPlayer) volume 0..30; the PAM8610 amp has no knob, so set it here
 CAMERA_GOALS = True     # count goals from the camera (turns itself off when the laser sensors report one)
