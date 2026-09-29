@@ -79,6 +79,7 @@ SETTINGS = [
     ("Camera & AI", "debug", "AI debug overlay", (False, True), False),
     ("Debug", "motor_test", "Motor & striker test", None, None),
 ]
+NO_SKIP = ("rules_buzz", "buzz_win")      # commentary the SKIP key can't cut: the buzzer rule, freezes
 DEBUG_MOVE_S = 0.3        # debug: one key press drives a carriage this long
 SPEC = {s[1]: s for s in SETTINGS}
 GROUPS = list(dict.fromkeys(s[0] for s in SETTINGS))
@@ -108,6 +109,7 @@ class Flow:
         self.hooks = hooks or {}
         self.sim = sim
         self.settings = self._load()
+        self.no_skip_until = 0.0
         self.log = []
         self.quiet_from = 0.0
         self.cm = Commentary()
@@ -162,6 +164,8 @@ class Flow:
         if self.settings["commentary"] and key:
             n = self._hook("say", key, text)
         d = n or estimate(text)
+        if key and key.startswith(NO_SKIP):          # the buzzer rule / who got frozen: always heard in full
+            self.no_skip_until = self.now + d
         if text:
             self.caption, self.caption_until = text, self.now + d + 0.5
         self.quiet_from = max(self.quiet_from, self.now + d + GAP_QUIET_S)
@@ -224,6 +228,8 @@ class Flow:
 
     def skip_line(self):
         """Skip the line being said right now (just that one): the next step of the script follows at once."""
+        if self.now < self.no_skip_until:
+            return
         self._hook("hush")
         self.caption_until = 0.0
         self.quiet_from = self.now
@@ -952,6 +958,7 @@ class Flow:
             "flash": self.flash if self.screen == "goal" else None,
             "menu": m,
             "caption": self.caption if now < self.caption_until else "",
+            "no_skip": now < self.no_skip_until,
             "freeze": {str(p): {"frozen": round(max(0.0, self.frozen[p] - now), 1)} for p in (1, 2)},
             "freeze_s": self.settings["freeze_s"],
             "rally": self.rally,

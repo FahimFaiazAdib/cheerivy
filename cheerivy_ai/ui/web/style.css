@@ -528,3 +528,4 @@ body.cal-on #caption .txt { font-size: 24px; }
 #caption .skip:hover { color: var(--ink); border-color: var(--ink); }
 #caption .skip kbd { font: 600 13px/1 var(--mono); opacity: .6; margin-left: 4px; }
 #caption.off .skip { pointer-events: none; }
+#caption.no-skip .skip { visibility: hidden; }     /* the buzzer rule can't be skipped */

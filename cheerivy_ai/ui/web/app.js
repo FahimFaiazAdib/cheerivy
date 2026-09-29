@@ -413,6 +413,7 @@ function render() {
   const cap = $('caption');
   cap.classList.toggle('off', !S.caption);
   if (S.caption) setText(cap.querySelector('.txt'), S.caption);
+  cap.classList.toggle('no-skip', !!S.no_skip);
 
   if (!$('dev').classList.contains('hidden')) {
     setText($('lcd'), S.lcd.join('\n'));
