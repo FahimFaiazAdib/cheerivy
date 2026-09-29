@@ -139,7 +139,7 @@ def main():
     goals = GoalWatcher() if (C.CAMERA_GOALS and not args.sim) else None
     p1_servo, p1_asked = None, False      # player 1's servo angles, as reported by the robot
     sound_test, sound_next_t, sound_i = False, 0.0, 0
-    df_volume = 15
+    df_volume = C.ROBOT_VOLUME
     sd_tracks = {}
     try:
         with open(os.path.join("show", "voice_bank", "sd_tracks.json")) as f:
@@ -187,6 +187,7 @@ def main():
                 sound_next_t = now + 5.0
             if not p1_asked and link.ser and not args.sim:
                 p1_asked = True
+                link.send(f"V{df_volume};")                # robot speaker volume from config.py
                 link.send("U0;")                        # the robot replies "P1SERVO <rest> <strike>"
             if fire:
                 link.send("F")
@@ -259,7 +260,7 @@ def main():
             if k in (ord(","), ord(".")) and not (show and show.phase == "NAMES"):
                 df_volume = max(0, min(30, df_volume + (2 if k == ord(".") else -2)))
                 link.send(f"V{df_volume};")
-                print(f"[sound] robot speaker volume {df_volume} / 30")
+                print(f"[sound] robot speaker volume {df_volume} / 30  (set ROBOT_VOLUME = {df_volume} in config.py to keep it)")
                 continue
             if k == ord("n") and not (show and show.phase == "NAMES"):
                 link.send(f"V{df_volume};")

@@ -280,7 +280,7 @@ static void wait_ms(uint32_t ms) {      /* blocking wait that keeps sounds and p
 #define DF_PORT PORTA
 #define DF_DDR  DDRA
 #define DF_BIT  PA5
-#define DF_VOLUME_DEFAULT 26
+#define DF_VOLUME_DEFAULT 14    /* the PAM8610 has a fixed high gain: keep this low; the laptop sets ROBOT_VOLUME */
 #define DF_BOOT_MS 1500                 /* the DFPlayer ignores commands while it reads the card */
 
 static volatile uint8_t df_cmd;         /* 'P' or 'V' while its number is arriving, else 0 */
