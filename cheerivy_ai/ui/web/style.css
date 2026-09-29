@@ -550,3 +550,6 @@ body.cal-on #caption .txt { font-size: 24px; }
 .hl-legend .ln.p2 { border-color: var(--p2); } .hl-legend .ln.p1 { border-color: var(--p1); }
 .hl-legend .ring { flex: none; width: 26px; height: 26px; margin: 0 9px; border-radius: 50%; border: 3px solid #ffd08a; box-shadow: 0 0 10px #ffb347; }
 .hl-legend .slow { margin-top: 10px; font: 800 20px/1 var(--mono); letter-spacing: .2em; color: var(--gold); }
+#asleep { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; gap: 26px; align-items: center;
+  justify-content: center; background: var(--bg); cursor: pointer; text-align: center; }
+#asleep b { font: italic 900 70px/1 var(--display); } #asleep small { font: 600 30px/1 var(--body); color: var(--dim); }

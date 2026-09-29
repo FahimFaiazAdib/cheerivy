@@ -12,12 +12,29 @@ function fit() {
 }
 addEventListener('resize', fit); fit();
 
+let ES = null;
 function connect() {
-  const es = new EventSource('/events');
+  const es = ES = new EventSource('/events');
   es.onmessage = e => { S = JSON.parse(e.data); S._t = performance.now(); $('offline').classList.add('hidden'); render(); };
   es.onerror = () => { $('offline').classList.remove('hidden'); };
 }
 connect();
+
+// One tab at a time. A browser opens at most 6 connections to the laptop, and every tab keeps 2-3
+// open (game state, camera pictures): with a few old tabs open, clicks and keys queue for ever.
+// main.py opens a new tab on every start, so the newest tab wins and the older ones go to sleep.
+const TAB_ID = Math.random();
+function sleepTab() {
+  if (ES) ES.close();
+  document.querySelectorAll('img').forEach(im => im.removeAttribute('src'));   // closes the camera streams
+  $('asleep').classList.remove('hidden');
+}
+try {
+  const bc = new BroadcastChannel('cheerivy');
+  bc.onmessage = e => { if (e.data !== TAB_ID) sleepTab(); };
+  bc.postMessage(TAB_ID);
+} catch (e) { /* very old browser: no tab hand-over */ }
+$('asleep').onclick = () => location.reload();                 // take over again: the others sleep
 document.querySelector('#caption .skip').onclick = () => sendKey('Tab');
 
 const NO_DEFAULT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Enter', 'F1', 'Tab'];
