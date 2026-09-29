@@ -191,7 +191,7 @@ const SCREENS = {
       <div class="head"><div class="kicker">CAMERA · CALIBRATE</div><div class="question">Click the 4 corners</div></div>
       <div class="cal-side"><div class="cal-step"></div>
         <ol class="cal-list">${CAL_STEPS.map(s => `<li>${s}</li>`).join('')}</ol>
-        <div class="cal-note">Click the <b>inside</b> corners, where the board meets the walls.</div>
+        <div class="cal-note">Click the <b>inside</b> corners, where the board meets the end walls. The game still shows the rails and carriages around it.</div>
         <div class="cal-btns"><button data-do="undo">UNDO <kbd>U</kbd></button>
           <button data-do="save" class="go">SAVE <kbd>ENTER</kbd></button>
           <button data-do="cancel">CANCEL <kbd>ESC</kbd></button></div></div>

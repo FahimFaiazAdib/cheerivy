@@ -29,6 +29,8 @@ CARRIAGE_MIN_X = X0 + CARRIAGE_W / 2           # carriage centre travel limits
 CARRIAGE_MAX_X = X0 + BASE_W - CARRIAGE_W / 2
 
 PX_PER_CM = 10          # resolution of the top-down (warped) image
+VIEW_MARGIN_CM = 7.0    # the game page shows this much around the calibrated board (rails, carriages,
+                        # walls); the AI still measures only the board itself
 
 # ---------------------------------------------------------------- camera
 CAMERA_INDEX = 0        # 0 = Iriun on this Mac (1 = FaceTime). None = auto-pick

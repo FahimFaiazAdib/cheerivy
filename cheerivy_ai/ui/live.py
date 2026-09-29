@@ -36,7 +36,7 @@ class LiveGame:
         self.sound = Sound(self.flow.cm.bank, st["voice_vol"] / 10, st["crowd_vol"] / 10) if sound else None
         # the keyboard still works (organisers / no joysticks): the same keys as the simulator
         self.hub = Hub(self.flow, {**SIM_KEYS, **ORGANISER_KEYS}, table=None, sound=self.sound)
-        self.hub.extra = {"video": True}
+        self.hub.extra = {"video": True, "view_margin": C.VIEW_MARGIN_CM}
         self.watcher = PlayWatcher()
         self.game = 0                    # the robot's game type (0 = menus)
         self.difficulty = 2
@@ -156,16 +156,19 @@ class LiveGame:
             self.calib = {"points": [tuple(map(float, p)) for p in data["points"]]}
 
     def _sample_post(self, data):
-        if data.get("what") in ("carriage", "ball"):
-            self.samples.append((data["what"], int(data["x"]), int(data["y"])))
+        if data.get("what") in ("carriage", "ball"):             # clicked on the picture with its margin
+            m = C.VIEW_MARGIN_CM * C.PX_PER_CM
+            self.samples.append((data["what"], int(data["x"] - m), int(data["y"] - m)))
 
     # ------------------------------------------------------------ camera -> game
-    def frame(self, stamp, flat, board, slope):
-        """Once per camera frame: the picture, and what the AI sees on it."""
+    def frame(self, stamp, flat, board, slope, view=None):
+        """Once per camera frame: the picture, and what the AI sees on it. view() makes the picture
+        shown on the page (the board plus a margin all round); only called when a frame is sent."""
         now = time.time()
         if flat is not None and now - self._last_video >= 1.0 / VIDEO_FPS:
             self._last_video = now
-            ok, jpg = cv2.imencode(".jpg", flat, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_QUALITY])
+            pic = view() if view else flat
+            ok, jpg = cv2.imencode(".jpg", pic, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_QUALITY])
             if ok:
                 self.hub.set_video(jpg.tobytes())
         events = []

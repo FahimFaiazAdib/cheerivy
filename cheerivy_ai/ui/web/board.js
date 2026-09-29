@@ -32,13 +32,14 @@ const Board = (() => {
   const trail = [];
   const sim = { x: W / 2, y: H / 2, vx: 18, vy: -34, ai: W / 2, p1: W / 2, trail: [] };
 
+  let M = 0;                                 // live: the camera picture shows M cm more all round
   function resize(scale) {
     const k = Math.min(2, (window.devicePixelRatio || 1) * scale);
     const w = cv.clientWidth, h = cv.clientHeight;
     if (!w) return;
     cv.width = Math.round(w * k); cv.height = Math.round(h * k);
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    s = Math.min((w - 200) / W, (h - 150) / H);
+    s = M ? Math.min((w - 80) / (W + 2 * M), (h - 150) / (H + 2 * M)) : Math.min((w - 200) / W, (h - 150) / H);
     ox = (w - W * s) / 2; oy = (h - H * s) / 2 + 8;
   }
   const px = (x, y) => [ox + x * s, oy + y * s];
@@ -101,6 +102,8 @@ const Board = (() => {
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000), t = now / 1000;
     last = now;
     if (st) setGeom(st.arena);
+    const m = (st && st.video && st.view_margin) || 0;
+    if (m !== M) { M = m; cv._scale = null; }
     if (cv.width === 0 || cv._scale !== scale) { resize(scale); cv._scale = scale; }
     const real = st && st.board;
     if (!real && st) stepSim(dt, st);
@@ -118,14 +121,19 @@ const Board = (() => {
     ctx.clearRect(0, 0, w, h);
     const img = st && st.video ? liveImage() : null;
 
-    if (img) {                               // the real table, straight from the camera
+    if (img) {                               // the real table, straight from the camera, with M cm around it
+      const [vx, vy, vw, vh] = [ox - M * s, oy - M * s, (W + 2 * M) * s, (H + 2 * M) * s];
       ctx.save();
-      ctx.beginPath(); ctx.roundRect(ox, oy, W * s, H * s, 10); ctx.clip();
-      ctx.drawImage(img, ox, oy, W * s, H * s);
-      ctx.fillStyle = 'rgba(4,8,16,.18)'; ctx.fillRect(ox, oy, W * s, H * s);   // a touch darker: overlays pop
+      ctx.beginPath(); ctx.roundRect(vx, vy, vw, vh, 12); ctx.clip();
+      ctx.drawImage(img, vx, vy, vw, vh);
+      ctx.fillStyle = 'rgba(4,8,16,.18)'; ctx.fillRect(vx, vy, vw, vh);   // a touch darker: overlays pop
       ctx.restore();
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(200,225,255,.35)';
-      ctx.beginPath(); ctx.roundRect(ox, oy, W * s, H * s, 10); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect(vx, vy, vw, vh, 12); ctx.stroke();
+      if (M) {                               // the board the AI measures
+        ctx.save(); ctx.setLineDash([8, 10]); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(200,225,255,.3)';
+        ctx.strokeRect(ox, oy, W * s, H * s); ctx.restore();
+      }
     } else {
     // pitch
     ctx.save();
@@ -152,9 +160,12 @@ const Board = (() => {
 
     const fz = (st && st.freeze) || {};
     if (img) {                               // real carriages are in the picture: mark them, ice when frozen
-      [[b.ai_x, true, '#1fd5f5', fz['2']], [b.p1_x, false, '#ff5b2e', fz['1']]].forEach(([x, top, col, f]) => {
+      [[b.ai_x, true, '#1fd5f5', fz['2'], b.ai_box], [b.p1_x, false, '#ff5b2e', fz['1'], b.p1_box]].forEach(([x, top, col, f, box]) => {
         if (x == null) return;
-        const [a, y0] = px(x - CW / 2, top ? 0 : H - DEPTH), [c, y1] = px(x + CW / 2, top ? DEPTH : H);
+        // on the tape where the camera sees it (seen from the side, a raised carriage looks shifted)
+        const pad = 1;
+        const [a, y0] = box ? px(box[0] - pad, box[1] - pad) : px(x - CW / 2, top ? 0 : H - DEPTH);
+        const [c, y1] = box ? px(box[0] + box[2] + pad, box[1] + box[3] + pad) : px(x + CW / 2, top ? DEPTH : H);
         ctx.save();
         ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.shadowColor = col; ctx.shadowBlur = 14;
         ctx.strokeRect(a, y0, c - a, y1 - y0);

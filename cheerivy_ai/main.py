@@ -115,6 +115,11 @@ def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paus
     return np.vstack([flat, panel])
 
 
+def box_cm(box):
+    """The tracker's box around a carriage's tape (top-down pixels) -> [x, y, w, h] in cm, for the page."""
+    return None if box is None else [round(v / C.PX_PER_CM, 1) for v in box]
+
+
 def web_calibration(source, live, can_cancel=True):
     """Calibrate on the browser page: it shows the camera picture, the organiser clicks the board's
     4 corners there. Returns the new Calibration (saved), or None if cancelled."""
@@ -391,9 +396,12 @@ def main():
                          "vel": [r(pred.vx), r(pred.vy)],
                          "path": [[r(x), r(y)] for x, y in pred.path()],
                          "ai_x": None if carriage_x is None else r(carriage_x),
+                         "ai_box": box_cm(tracker.carriage_box),
+                         "p1_box": box_cm(tracker.p1_box) if aivai else None,
                          "p1_x": None if (p1_x is None or not aivai) else r(p1_x),
                          "path1": [[r(x), r(C.ARENA_H - y)] for x, y in pred1.path()] if aivai else []}
-                live.frame(stamp, flat_clean, board, pred.slope)
+                live.frame(stamp, flat_clean, board, pred.slope,
+                           view=lambda: cal.warp_view(frame, C.VIEW_MARGIN_CM))
 
             if show:
                 show.link_state = link.mode

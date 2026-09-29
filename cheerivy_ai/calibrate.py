@@ -65,6 +65,14 @@ class Calibration:
         """Camera frame -> flat top-down arena image (PX_PER_CM pixels per cm)."""
         return cv2.warpPerspective(frame, self.M, (self.out_w, self.out_h))
 
+    def warp_view(self, frame, margin_cm):
+        """The same top-down picture with margin_cm more all round (for showing, not measuring)."""
+        m = margin_cm * C.PX_PER_CM
+        if getattr(self, "_view", None) is None or self._view[0] != m:
+            shift = np.float64([[1, 0, m], [0, 1, m], [0, 0, 1]])
+            self._view = (m, shift @ self.M, (int(self.out_w + 2 * m), int(self.out_h + 2 * m)))
+        return cv2.warpPerspective(frame, self._view[1], self._view[2])
+
     def save(self, path=C.CALIB_FILE):
         with open(path, "w") as f:
             json.dump({"corners": self.corners.tolist(), "walls": self.wall_px,
