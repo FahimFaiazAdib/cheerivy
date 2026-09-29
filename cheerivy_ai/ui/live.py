@@ -43,6 +43,10 @@ class LiveGame:
         self.locked = True
         self.robot_screen = False        # the robot is in screen mode (it says "SCREEN" every second)
         self.want_recalibrate = False
+        self.calib = None                # the page's corner clicks: {"points": [[x, y] x4]} or "cancel"
+        self.samples = []                # the page's colour clicks: (what, x, y) on the top-down picture
+        self._last_raw = 0.0
+        self.hub.posts.update({"/calib": self._calib_post, "/sample": self._sample_post})
         self.debug = False               # Settings > Debug > Motor & striker test is open
         self.manual = {1: ("S", 0.0), 2: ("S", 0.0)}   # debug keyboard moves: (L/R/S, until)
         self._last_video = 0.0
@@ -112,6 +116,48 @@ class LiveGame:
         """Debug: the keyboard's move for carriage p right now ('L' 'R' 'S')."""
         cmd, until = self.manual[p]
         return cmd if now < until else "S"
+
+    # ------------------------------------------------------------ calibration on the page
+    def begin_calibration(self):
+        """main.py: show the board-corner screen (start-up without a saved calibration)."""
+        self.calib = None
+        self.hub.event(("calib", "board"))
+
+    def raw(self, frame):
+        """The camera picture as filmed, for clicking the corners (10 per second is plenty)."""
+        now = time.time()
+        if now - self._last_raw >= 0.1:
+            self._last_raw = now
+            ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_QUALITY])
+            if ok:
+                self.hub.set_video(jpg.tobytes(), "raw")
+
+    def take_calibration(self):
+        c, self.calib = self.calib, None
+        return c
+
+    def end_calibration(self, message=None):
+        self.hub.event(("calib_done",))
+        if message:
+            self.notice(message)
+
+    def take_samples(self):
+        s, self.samples = self.samples, []
+        return s
+
+    def notice(self, text, seconds=6.0):
+        with self.hub.cond:
+            self.flow.notice(text, seconds)
+
+    def _calib_post(self, data):
+        if data.get("cancel"):
+            self.calib = "cancel"
+        elif len(data.get("points") or []) == 4:
+            self.calib = {"points": [tuple(map(float, p)) for p in data["points"]]}
+
+    def _sample_post(self, data):
+        if data.get("what") in ("carriage", "ball"):
+            self.samples.append((data["what"], int(data["x"]), int(data["y"])))
 
     # ------------------------------------------------------------ camera -> game
     def frame(self, stamp, flat, board, slope):
@@ -196,7 +242,7 @@ class LiveGame:
             self.link.send("T1;")
         elif key == "recalibrate":
             self.want_recalibrate = True
+        elif key == "calib_cancel":
+            self.calib = "cancel"
         elif key == "sound_test" and self.sound:
             self.sound.crowd("roar")
-        elif key == "reteach":
-            print("[live] re-teach colours: LEFT-click a carriage's tape / RIGHT-click the ball in the vision window")

@@ -82,6 +82,14 @@ class Calibration:
         return cls(d["corners"], d.get("walls", []))
 
 
+def to_front(win, on=True):
+    """Keep an OpenCV window above the others (the browser game is fullscreen on the same laptop)."""
+    try:
+        cv2.setWindowProperty(win, cv2.WND_PROP_TOPMOST, 1 if on else 0)
+    except (cv2.error, AttributeError):
+        pass
+
+
 def run_calibration(source, win="CHEERIVY calibrate"):
     base, walls = [], []
 
@@ -115,6 +123,7 @@ def run_calibration(source, win="CHEERIVY calibrate"):
         if first:
             # macOS: the mouse callback must be attached AFTER the window has shown an image.
             cv2.setMouseCallback(win, click)
+            to_front(win)
             first = False
 
         k = cv2.waitKey(1) & 0xFF

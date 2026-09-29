@@ -115,6 +115,31 @@ def draw(flat, arena, ball, carriage_x, pred, ctrl, cmd, status, fps, link, paus
     return np.vstack([flat, panel])
 
 
+def web_calibration(source, live, can_cancel=True):
+    """Calibrate on the browser page: it shows the camera picture, the organiser clicks the board's
+    4 corners there. Returns the new Calibration (saved), or None if cancelled."""
+    live.begin_calibration()
+    print("[calib] calibrate on the game page: click the board's 4 corners on the camera picture")
+    while True:
+        frame, _, _ = source.read()
+        if frame is not None:
+            live.raw(frame)
+        got = live.take_calibration()
+        if got == "cancel":
+            if can_cancel:
+                live.end_calibration("Calibration cancelled: the old one is kept.")
+                return None
+            live.notice("The camera must be calibrated before the game can start.")
+        elif got:
+            cal = Calibration(got["points"])
+            cal.save()
+            print(f"[calib] saved to {C.CALIB_FILE}")
+            live.end_calibration("Board calibrated and saved.")
+            return cal
+        cv2.waitKey(1)                     # keeps the OpenCV windows alive meanwhile
+        time.sleep(0.03)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", action="store_true", help="virtual arena, no hardware")
@@ -135,10 +160,19 @@ def main():
         cal = Calibration(source.corners, source.wall_px)
         link = Link(sink=source, enabled=False)  # simulator never touches the real HC-05
     else:
-        cal = Calibration.load() or run_calibration(source)
+        cal = Calibration.load()
+        link = Link(port=args.port, enabled=not args.no_send)
+
+    # The new browser game (cheerivy_ai/ui): it runs the match; the robot follows it in "screen mode".
+    live = None
+    if not args.no_show and not args.old_show and not args.sim:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui"))
+        from live import LiveGame
+        live = LiveGame(link, port=args.screen_port, sound=not args.no_voice)
+    if cal is None:
+        cal = web_calibration(source, live, can_cancel=False) if live else run_calibration(source)
         if cal is None:
             return
-        link = Link(port=args.port, enabled=not args.no_send)
 
     tracker, pred, ctrl = Tracker(cal.arena), Predictor(cal.arena), Controller()
     # AI vs AI: a second AI for player 1's carriage. It sees the board mirrored (its own end on top),
@@ -162,13 +196,6 @@ def main():
 
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()
-
-    # The new browser game (cheerivy_ai/ui): it runs the match; the robot follows it in "screen mode".
-    live = None
-    if not args.no_show and not args.old_show and not args.sim:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui"))
-        from live import LiveGame
-        live = LiveGame(link, port=args.screen_port, sound=not args.no_voice)
 
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
     if not args.no_show and not live:
@@ -240,9 +267,12 @@ def main():
                     ctrl.set_difficulty(live.difficulty)
                     ctrl1.set_difficulty(live.difficulty)
                 paused = not live.ai_plays()
+                for what, x, y in live.take_samples():  # Settings > Re-teach colours: clicks on the page
+                    sample = tracker.sample_carriage if what == "carriage" else tracker.sample_ball
+                    live.notice(sample(flat_clean, x, y))
                 if live.want_recalibrate and not args.sim:
                     live.want_recalibrate = False
-                    cal = run_calibration(source) or cal
+                    cal = web_calibration(source, live) or cal
                     tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
                     pred1 = Predictor(mirrored(cal.arena))
                     tracker.find_p1 = aivai
@@ -481,7 +511,7 @@ def main():
             elif k == ord("z"):
                 link.send("Z")
             elif k == ord("c") and not args.sim:
-                cal = run_calibration(source) or cal
+                cal = (web_calibration(source, live) if live else run_calibration(source)) or cal
                 tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
                 pred1 = Predictor(mirrored(cal.arena))
                 tracker.find_p1 = aivai

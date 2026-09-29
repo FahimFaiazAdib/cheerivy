@@ -39,6 +39,11 @@ def _sample(flat_img, x_px, y_px):
     return tuple(int(c) for c in np.median(patch, axis=0))
 
 
+
+def _said(msg):
+    print(f"[tracker] {msg}")
+    return msg
+
 class Tracker:
     def __init__(self, arena):
         self.arena = arena
@@ -63,33 +68,32 @@ class Tracker:
         return self._field
 
     def sample_carriage(self, flat_img, x_px, y_px):
+        """Learn a carriage's tape colour from a click. Returns what happened (for the screen)."""
         hsv = _sample(flat_img, x_px, y_px)
         if hsv is None:
-            return
+            return _said("Missed the board. Click on the board picture.")
         h, s, v = hsv
         if s < 60:
-            print(f"[tracker] ignored click: that's not a colour (H={h} S={s} V={v}) — click ON the carriage tape")
-            return
+            return _said(f"That's not a colour (H={h} S={s} V={v}). Click ON the carriage tape.")
         if y_px > C.ARENA_H / 2 * C.PX_PER_CM:        # the bottom half: player 1's carriage
             self.p1_ranges = _hue_ranges(h, s, v, 10)
-            print(f"[tracker] PLAYER 1 carriage colour sampled: H={h} S={s} V={v}")
-            return
+            return _said(f"Player 1's carriage colour learned (H={h} S={s} V={v}).")
         self.carriage_ranges = _hue_ranges(h, s, v, 10)
-        print(f"[tracker] carriage colour sampled: H={h} S={s} V={v}")
+        return _said(f"The AI-side carriage colour learned (H={h} S={s} V={v}).")
 
     def sample_ball(self, flat_img, x_px, y_px):
+        """Learn the ball's colour from a click. Returns what happened (for the screen)."""
         hsv = _sample(flat_img, x_px, y_px)
         if hsv is None:
-            return
+            return _said("Missed the board. Click on the board picture.")
         h, s, v = hsv
         if v < C.BALL_MAX_V:
             self.ball_ranges = None                       # a dark ball: use "black" mode
-            print(f"[tracker] ball colour sampled: black (V={v})")
-        elif s < 60:
-            print(f"[tracker] ignored click: that's white/grey (H={h} S={s} V={v}) — right-click ON the ball")
-        else:
-            self.ball_ranges = _hue_ranges(h, s, v, 8)
-            print(f"[tracker] ball colour sampled: H={h} S={s} V={v}")
+            return _said(f"Ball colour learned: black (V={v}).")
+        if s < 60:
+            return _said(f"That's white or grey (H={h} S={s} V={v}). Right-click ON the ball.")
+        self.ball_ranges = _hue_ranges(h, s, v, 8)
+        return _said(f"Ball colour learned (H={h} S={s} V={v}).")
 
     def _color_mask(self, hsv, ranges):
         mask = np.zeros(hsv.shape[:2], np.uint8)

@@ -487,3 +487,39 @@ body.match-on.live-on #caption { bottom: 80px; }
 #dev .keys { margin-top: 12px; color: var(--faint); font-size: 14px; }
 
 #offline { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 800 44px/1 var(--display); letter-spacing: .3em; color: var(--dim); background: var(--bg); z-index: 20; }
+
+/* ------------------------------------------------------------ calibrate (Settings > Camera & AI) */
+.cal .head { position: absolute; left: 120px; top: 90px; }
+.cal .head .question { font-size: 84px; margin-top: 16px; }
+.cal-side { position: absolute; left: 120px; top: 300px; width: 540px; }
+.cal-step { font: 800 30px/1 var(--display); letter-spacing: .18em; color: var(--gold); margin-bottom: 26px; }
+.cal-list { list-style: none; counter-reset: s; display: grid; gap: 14px; }
+.cal-list li { counter-increment: s; position: relative; padding: 16px 18px 16px 66px; border-radius: 14px;
+  font: 600 26px/1.3 var(--body); color: var(--dim); background: var(--glass); border: 2px solid var(--line); }
+.cal-list li::before { content: counter(s); position: absolute; left: 18px; top: 50%; translate: 0 -50%;
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  font: 800 22px/1 var(--display); background: var(--bg2); border: 2px solid var(--line-hi); }
+.cal-list li.now { color: var(--ink); border-color: var(--ink); background: var(--glass-hi); }
+.cal-list li.done { color: var(--ink); }
+.cal-list li.done::before { content: "✓"; background: var(--ink); color: var(--bg); }
+.cal-list.plain li { color: var(--ink); }
+.cal-list b.t1 { color: var(--p1); } .cal-list b.t2 { color: var(--p2); }
+.cal-note { margin-top: 22px; font: 500 22px/1.35 var(--body); color: var(--dim); }
+.cal-btns { display: flex; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
+.cal-btns button { font: 800 24px/1 var(--display); letter-spacing: .1em; color: var(--ink); cursor: pointer;
+  padding: 16px 18px; border-radius: 12px; background: var(--glass-hi); border: 2px solid var(--line-hi); }
+.cal-btns button.go { background: var(--ink); color: var(--bg); }
+.cal-btns button:disabled { opacity: .35; cursor: default; }
+.cal-btns kbd { font: 600 16px/1 var(--mono); opacity: .6; margin-left: 6px; }
+.cal-pic { position: absolute; left: 700px; top: 110px; width: 1120px; height: 860px;
+  display: grid; place-items: center; }
+.cal-pic img { display: block; height: auto; border-radius: 12px; cursor: crosshair;
+  border: 2px solid var(--line-hi); box-shadow: 0 30px 80px rgba(0,0,0,.6); user-select: none; -webkit-user-drag: none; }
+.cal-frame { position: relative; line-height: 0; }
+.cal-frame svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cal-wait { position: absolute; font: 600 30px/1 var(--body); color: var(--dim); }
+.cal.ready .cal-wait { display: none; }
+.cal:not(.ready) .cal-pic img { visibility: hidden; }
+#overlay { pointer-events: none; }            /* never in the way of the calibration clicks */
+body.cal-on #caption { left: 390px; bottom: 70px; max-width: 580px; padding: 18px 24px; }
+body.cal-on #caption .txt { font-size: 24px; }

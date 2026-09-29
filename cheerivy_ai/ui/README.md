@@ -45,6 +45,9 @@ The page is a fixed 1920×1080 stage, scaled to fit, so it looks the same on the
 - Game → robot: `C<n>;` game type, `O1;`/`O0;` unlock/lock, `D3;`..`D0;` countdown / GO, `D9;` buzzer race, `I<p><s>;` freeze.
 - Camera → game: the calibrated top-down picture as MJPEG (`/video`, drawn in AI VISION) and the AI's numbers (`board`).
 - The AI plays only while the game says the ball is live. Camera goals are used until the lasers report goals.
+- Calibration on the page (Settings › Camera & AI, and at start-up with no saved calibration): the camera
+  picture (`/raw`) — click the board's 4 corners, SAVE (`POST /calib`). Re-teach colours: left-click a
+  carriage's tape / right-click the ball on the top-down picture (`POST /sample`).
 
 ## Still to do
 - Real replays in the highlights reel. LCD 16×2 text.

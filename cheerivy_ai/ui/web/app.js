@@ -23,6 +23,14 @@ const NO_DEFAULT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 
 addEventListener('keydown', e => {
   if (NO_DEFAULT.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
+  if (S && S.screen === 'calibrate') {           // the mouse does the work; a few keys help
+    if (S.calib === 'board') {
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') calSave();
+      else if (e.code === 'KeyU' || e.code === 'Backspace') calUndo();
+      else if (e.code === 'Escape') calCancel();
+    } else if (e.code === 'Escape' || e.code === 'Enter') sendKey('Escape');
+    return;
+  }
   if (e.code === 'Backquote') { $('dev').classList.toggle('hidden'); return; }
   if (e.code === 'KeyF' && !e.metaKey && !e.ctrlKey) { document.documentElement.requestFullscreen?.(); return; }
   fetch('/key', { method: 'POST', body: JSON.stringify({ key: e.code }) }).catch(() => {});
@@ -42,6 +50,38 @@ const mmss = s => { s = Math.max(0, Math.ceil(s - 1e-6)); return `${Math.floor(s
 const side = p => (p === 1 ? 'p1' : 'p2');
 const isAI = () => S.mode === 'ai' || S.mode === 'aivai';   // side 2 is the machine
 const MODE_LABEL = { ai: 'VS MACHINE', '2p': '2 PLAYERS', aivai: 'AI VS AI' };
+
+// ------------------------------------------------------------------ calibration clicks
+const CAL_STEPS = ['A corner of the wall behind <b class="t2">PLAYER 2 / THE AI</b>', 'The <b>other</b> corner of that same wall',
+  'A corner of the wall behind <b class="t1">PLAYER 1</b>', 'The <b>other</b> corner of that same wall'];
+let calPts = [], calPing = null, calTimer = 0;
+const sendKey = key => fetch('/key', { method: 'POST', body: JSON.stringify({ key }) }).catch(() => {});
+const calUndo = () => { calPts.pop(); calDraw(); };
+const calSave = () => { if (calPts.length === 4) fetch('/calib', { method: 'POST', body: JSON.stringify({ points: calPts }) }).catch(() => {}); };
+const calCancel = () => sendKey('Escape');       // the game decides (no cancelling the very first calibration)
+function calDraw() {
+  const el = document.querySelector('.cal'); if (!el) return;
+  const img = el.querySelector('img'), svg = el.querySelector('svg'), w = img.naturalWidth, h = img.naturalHeight;
+  el.classList.toggle('ready', w > 0);
+  const step = el.querySelector('.cal-step');
+  if (step) setText(step, calPts.length < 4 ? `STEP ${calPts.length + 1} OF 4` : 'ALL 4 CLICKED · PRESS SAVE');
+  el.querySelectorAll('.cal-list li').forEach((li, i) => { li.classList.toggle('done', i < calPts.length); li.classList.toggle('now', i === calPts.length && S.calib === 'board'); });
+  const save = el.querySelector('[data-do=save]'); if (save) save.disabled = calPts.length !== 4;
+  if (!w) return;
+  const fitW = Math.round(w * Math.min(1120 / w, 860 / h)) + 'px';   // as big as the space allows
+  if (img.style.width !== fitW) img.style.width = fitW;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const r = w / 90, col = i => (i < 2 ? 'var(--p2)' : 'var(--p1)');
+  let out = '';
+  if (calPts.length > 1) out += `<${calPts.length < 4 ? 'polyline fill="none"' : 'polygon fill="rgba(255,255,255,.08)"'} points="${calPts.map(p => p.join(',')).join(' ')}" stroke="#fff" stroke-width="${r / 3}"/>`;
+  calPts.forEach((p, i) => { out += `<circle cx="${p[0]}" cy="${p[1]}" r="${r}" fill="${col(i)}" stroke="#000" stroke-width="${r / 4}"/>
+    <text x="${p[0] + r * 1.4}" y="${p[1] - r * 1.2}" font-size="${r * 2.4}" font-weight="800" fill="#fff" stroke="#000" stroke-width="${r / 5}" paint-order="stroke">${i + 1}</text>`; });
+  if (calPing && performance.now() - calPing[3] < 1500) {
+    const [x, y, what] = calPing;
+    out += `<circle cx="${x}" cy="${y}" r="${r * 1.6}" fill="none" stroke="${what === 'ball' ? 'var(--gold)' : '#fff'}" stroke-width="${r / 3}"/>`;
+  }
+  if (svg.innerHTML !== out) svg.innerHTML = out;
+}
 
 const hints = (...h) => `<div class="hints">${h.map(([g, t]) => `<div class="hint">${
   g === 'btn' ? '<i class="btn"></i>' : `<i class="stick ${g === 'v' ? 'v' : ''}"></i>`}${t}</div>`).join('')}</div>`;
@@ -138,6 +178,59 @@ const SCREENS = {
         const html = v === 'ON' ? '<span class="yes">ON</span>' : v === 'OFF' ? '<span class="no">OFF</span>' : esc(v);
         if (e.innerHTML !== html) e.innerHTML = html;
       });
+    }];
+  },
+
+  // Settings > Camera & AI (and start-up without a saved calibration), with the laptop's mouse:
+  // "board" = click the board's 4 corners on the camera picture; "colours" = click tape / ball.
+  calibrate: () => {
+    const board = S.calib === 'board';
+    const html = board ? `
+    <div class="screen cal">
+      <div class="head"><div class="kicker">CAMERA · CALIBRATE</div><div class="question">Click the 4 corners</div></div>
+      <div class="cal-side"><div class="cal-step"></div>
+        <ol class="cal-list">${CAL_STEPS.map(s => `<li>${s}</li>`).join('')}</ol>
+        <div class="cal-note">Click the <b>inside</b> corners, where the board meets the walls.</div>
+        <div class="cal-btns"><button data-do="undo">UNDO <kbd>U</kbd></button>
+          <button data-do="save" class="go">SAVE <kbd>ENTER</kbd></button>
+          <button data-do="cancel">CANCEL <kbd>ESC</kbd></button></div></div>
+      <div class="cal-pic"><div class="cal-frame"><img src="/raw" alt=""><svg class="cal-marks"></svg></div><div class="cal-wait">Waiting for the camera…</div></div>
+    </div>` : `
+    <div class="screen cal">
+      <div class="head"><div class="kicker">CAMERA · COLOURS</div><div class="question">Teach the colours</div></div>
+      <div class="cal-side">
+        <ol class="cal-list plain"><li><b>LEFT-click</b> the tape on a carriage. The top half teaches the AI side's carriage, the bottom half player 1's.</li>
+          <li><b>RIGHT-click</b> the ball.</li></ol>
+        <div class="cal-note">The result shows at the bottom of the screen. Click again to correct it.</div>
+        <div class="cal-btns"><button data-do="done" class="go">DONE <kbd>ESC</kbd></button></div></div>
+      <div class="cal-pic"><div class="cal-frame"><img src="/video" alt=""><svg class="cal-marks"></svg></div><div class="cal-wait">Waiting for the camera…</div></div>
+    </div>`;
+    return ['calib:' + S.calib, html, root => {
+      const el = root.querySelector('.cal');
+      if (!el || el.dataset.init) return;
+      el.dataset.init = 1;
+      calPts = [];
+      const img = el.querySelector('img');
+      const act = { undo: calUndo, save: calSave, cancel: calCancel, done: () => sendKey('Escape') };
+      el.querySelectorAll('[data-do]').forEach(b => b.onclick = () => act[b.dataset.do]());
+      img.onmousedown = e => {
+        e.preventDefault();
+        if (!img.naturalWidth) return;
+        const r = img.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width * img.naturalWidth, y = (e.clientY - r.top) / r.height * img.naturalHeight;
+        if (board) {
+          if (e.button === 0 && calPts.length < 4) calPts.push([Math.round(x), Math.round(y)]);
+        } else {
+          const what = e.button === 2 ? 'ball' : 'carriage';
+          fetch('/sample', { method: 'POST', body: JSON.stringify({ what, x: Math.round(x), y: Math.round(y) }) }).catch(() => {});
+          calPing = [x, y, what, performance.now()];
+        }
+        calDraw();
+      };
+      img.oncontextmenu = e => e.preventDefault();
+      clearInterval(calTimer);
+      calTimer = setInterval(() => { if (!document.body.contains(img)) clearInterval(calTimer); else calDraw(); }, 200);
+      calDraw();
     }];
   },
 
@@ -298,6 +391,7 @@ function render() {
   const sc = S.screen, inMatch = MATCH.includes(sc);
   document.body.classList.toggle('match-on', inMatch);
   document.body.classList.toggle('live-on', sc === 'live' || sc === 'countdown');
+  document.body.classList.toggle('cal-on', sc === 'calibrate');
   $('match').classList.toggle('hidden', !inMatch);
 
   const screen = $('screen'), fn = SCREENS[sc];

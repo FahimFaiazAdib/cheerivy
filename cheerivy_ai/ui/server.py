@@ -68,12 +68,13 @@ class Hub:
         self.version, self.data = 0, "{}"
         self.last = time.monotonic()
         self.extra = {}                             # extra fields for the page (live: {"video": True})
-        self.vcond = threading.Condition()          # live camera picture (JPEG) for /video
-        self.video, self.video_seq = None, 0
+        self.vcond = threading.Condition()          # camera pictures (JPEG): /video top-down, /raw as filmed
+        self.frames = {"video": (None, 0), "raw": (None, 0)}
+        self.posts = {}                             # live: "/calib", "/sample" -> fn(data) (clicks on the page)
 
-    def set_video(self, jpg):
+    def set_video(self, jpg, which="video"):
         with self.vcond:
-            self.video, self.video_seq = jpg, self.video_seq + 1
+            self.frames[which] = (jpg, self.frames[which][1] + 1)
             self.vcond.notify_all()
 
     def feed(self, board, events=()):
@@ -137,8 +138,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/events":
             return self._events()
-        if path == "/video":
-            return self._video()
+        if path in ("/video", "/raw"):
+            return self._video(path[1:])
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
         full = os.path.normpath(os.path.join(WEB, rel))
         if not full.startswith(WEB) or not os.path.isfile(full):
@@ -154,17 +155,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != "/key":
+        fn = self.hub.posts.get(self.path)
+        if self.path != "/key" and not fn:
             self.send_error(404)
             return
         n = int(self.headers.get("Content-Length") or 0)
         try:
-            key = json.loads(self.rfile.read(n) or b"{}").get("key")
+            data = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
-            key = None
-        ev = self.hub.keys.get(key)
-        if ev:
-            self.hub.event(ev)
+            data = {}
+        if fn:
+            fn(data)
+        else:
+            ev = self.hub.keys.get(data.get("key"))
+            if ev:
+                self.hub.event(ev)
         self.send_response(204)
         self.end_headers()
 
@@ -185,8 +190,9 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
 
-    def _video(self):
-        """The live top-down camera picture as MJPEG (an <img> shows it; the page draws on top)."""
+    def _video(self, which="video"):
+        """A camera picture as MJPEG (an <img> shows it; the page draws on top): the top-down board
+        (video) or the camera's own view (raw, for calibrating)."""
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-store")
@@ -195,8 +201,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 with hub.vcond:
-                    hub.vcond.wait_for(lambda: hub.video_seq != seen, timeout=5)
-                    jpg, seen = hub.video, hub.video_seq
+                    hub.vcond.wait_for(lambda: hub.frames[which][1] != seen, timeout=5)
+                    jpg, seen = hub.frames[which]
                 if jpg is None:
                     continue
                 self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "

@@ -148,6 +148,10 @@ class Flow:
     def _robot(self, cmd):
         self._hook("robot", cmd)
 
+    def notice(self, text, seconds=8.0):
+        """A message on screen (any screen), e.g. what to do in a window on the laptop."""
+        self.caption, self.caption_until = text, self.now + seconds
+
     def _log(self, msg):
         self.log.append(f"{self.now - self.t0:7.1f}  {msg}")
         del self.log[:-12]
@@ -323,6 +327,8 @@ class Flow:
                 return self._settings_items(i)
             if i == "motor_test":
                 return self._debug()
+            if i in ("recalibrate", "reteach"):
+                self._calibrate("board" if i == "recalibrate" else "colours")
             if SPEC[i][3] is None:
                 return self._hook("action", i)
             return self._change_setting(i, +1)
@@ -348,6 +354,31 @@ class Flow:
         if s == "debug":
             self._robot("debug off")
             return self._settings_items("Debug")
+
+    # ---------------------------------------------------------------- calibration
+    # On the page, with the mouse on the laptop: "board" = click the board's 4 corners on the camera
+    # picture; "colours" = click the carriage tape / the ball on the top-down picture.
+    def _calibrate(self, kind):
+        self._stop_script()
+        self.calib_kind = kind
+        if self.screen != "calibrate":         # (the camera loop confirms the screen: keep where it came from)
+            self.calib_from = "settings" if self.screen == "settings" else "home"
+        self._enter("calibrate")
+
+    def _calib_back(self):
+        if self.screen != "calibrate":
+            return
+        if self.calib_from == "home":
+            return self._home(self.now)
+        item = "recalibrate" if self.calib_kind == "board" else "reteach"
+        ids = [k for g, k, *_ in SETTINGS if g == "Camera & AI"]
+        self._settings_items("Camera & AI", ids.index(item))
+
+    def _calibrate_input(self, kind):
+        if kind in ("back", "home", "settings", "pause"):
+            if self.calib_kind == "colours" or self.sim:     # (the simulator has no camera to wait for)
+                return self._calib_back()
+            self._hook("action", "calib_cancel")    # the camera loop decides (not at start-up)
 
     # ---------------------------------------------------------------- debug
     # Motor & striker test (Settings > Debug), with the camera view on screen:
@@ -751,6 +782,12 @@ class Flow:
     def event(self, ev, now):
         self.now, self.last_input = now, now
         kind, *a = ev
+        if kind == "calib":
+            return self._calibrate(a[0])
+        if kind == "calib_done":
+            return self._calib_back()
+        if self.screen == "calibrate":
+            return self._calibrate_input(kind)
         if kind == "home":
             return self._home(now)
         if kind == "settings":
@@ -863,6 +900,8 @@ class Flow:
             l = ("PAUSED", "Resume  Home")
         elif s == "debug":
             l = ("DEBUG", "Motor test")
+        elif s == "calibrate":
+            l = ("CALIBRATING", "Use the laptop")
         else:
             l = ("FULL TIME", sc)
         l = tuple(x[:16].ljust(16) for x in l)
@@ -891,6 +930,7 @@ class Flow:
             "names": {"1": self.name(1), "2": self.name(2)},
             "tags": {"1": self.tag(1), "2": self.tag(2)},
             "debug": getattr(self, "debug_last", None) if self.screen == "debug" else None,
+            "calib": getattr(self, "calib_kind", None) if self.screen == "calibrate" else None,
             "score": self.score,
             "clock": round(self.clock, 1),
             "running": self.running,
