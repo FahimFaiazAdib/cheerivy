@@ -11,7 +11,8 @@ CHEERIVY — Vision AI (Layer B)
     python3 main.py --no-voice   # live show without George's commentary
 
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
-       x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
+       x swap left/right (AI carriage)   y swap left/right (player 1's carriage, AI vs AI)
+       1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
        b  AI vs AI on/off: the camera AI drives PLAYER 1's carriage too (blue tape on it);
           the next match started from the show is played AI vs AI
        servo tuning (saved on the robot):    p  switch player 1 <-> player 2
@@ -329,7 +330,7 @@ def main():
                     who = goals.update(stamp, ball, pred.vy)
                     if who:
                         print(f"[goal] camera: {'player 1' if who == 'H' else 'AI side'} scores")
-                        live.goal(who)
+                        live.goal(who, camera=True)
             elif goals and in_match:
                 who = goals.update(stamp, ball, pred.vy)
                 if who:
@@ -435,6 +436,11 @@ def main():
                 paused = not paused
             elif k in (ord("a"), ord("d")) and paused:
                 manual, manual_until = ("L" if k == ord("a") else "R"), time.time() + 0.25
+            elif k == ord("y"):
+                link.swap1 = not link.swap1
+                link.current1 = None                # resend player 1's move the new way round
+                print(f"[link] player 1 L/R swap {'ON' if link.swap1 else 'OFF'} "
+                      f"(set SWAP_LR_P1 = {link.swap1} in config.py to keep it)")
             elif k == ord("x"):
                 link.swap = not link.swap
                 print(f"[link] L/R swap {'ON' if link.swap else 'OFF'} (set SWAP_LR = {link.swap} in config.py to keep it)")

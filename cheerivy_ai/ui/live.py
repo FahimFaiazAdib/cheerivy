@@ -96,10 +96,12 @@ class LiveGame:
             return True
         return False
 
-    def goal(self, who):
+    def goal(self, who, camera=False):
         """'H' = the human side (player 1) scored, 'A' = the AI side / player 2 scored."""
         scorer = 1 if who == "H" else 2
         own = "own" if self.watcher.last_touch == 3 - scorer else ""
+        if camera and self.in_play():               # the lasers beep by themselves; for the camera, ask
+            self.link.send("D7;" if scorer == 1 else "D8;")
         self.hub.event(("goal", scorer, own))
 
     # ------------------------------------------------------------ camera -> game

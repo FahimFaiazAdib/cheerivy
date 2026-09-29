@@ -43,7 +43,8 @@
  *  SCREEN MODE (the new browser game, cheerivy_ai/main.py): the laptop runs the whole game.
  *    "C<n>;"  enter / set the game: 0 none yet (menus), 1 vs AI, 2 two players, 3 AI vs AI
  *    "O1;" unlock (play)   "O0;" lock (carriages stop, strikers rest, joysticks only report)
- *    "D<n>;"  sounds: 3 / 2 / 1 countdown beep, 0 GO, 9 the buzzer-race beep
+ *    "D<n>;"  sounds: 3 / 2 / 1 countdown beep, 0 GO, 9 the buzzer-race beep,
+ *             7 / 8 goal tune (player 1 / AI side scored; for goals the camera saw)
  *    "I<p><s>;"  freeze side p (1 = player 1, 2 = AI / player 2) for s seconds (buzzer race won)
  *    The robot reports every input:  "IN <p> L|R|U|D" joystick flicks, "IN <p> X" joystick held
  *    down 1 s (back), "IN <p> B" button tap, "IN P" both buttons held 3 s (pause);
@@ -876,6 +877,8 @@ static void screen_game(void) {
     if (l) locked = (l == 1);
     if (b == 10) PLAY(SND_BUZZ);                               /* "D9;" */
     else if (b == 1) PLAY(SND_GO);                             /* "D0;" */
+    else if (b == 8) PLAY(SND_GOAL_HUMAN);                     /* "D7;" a camera goal: player 1 scored */
+    else if (b == 9) PLAY(SND_GOAL_AI);                        /* "D8;" a camera goal: the AI side scored */
     else if (b) PLAY(SND_CD);                                  /* "D1;" .. "D3;" */
     if (f) {                                                   /* "I<p><s>;" */
       uint8_t who = (f - 1) / 10, secs = (f - 1) % 10;
@@ -941,11 +944,14 @@ static void screen_game(void) {
       else if (now < ai_frozen_until) PLAY(SND_FROZEN_AI);
     }
 
-    /* goals: just report them; the laptop keeps the score */
+    /* goals: beep and report them (the laptop keeps the score). Only while the ball is in play:
+       placing the ball for a restart must not count. */
     uint8_t gf = goal_flags_take();
-    if (gf && now >= goal_ready_at) {
+    if (gf && play && now >= goal_ready_at) {
       goal_ready_at = now + GOAL_LOCKOUT_MS;
-      uart_puts((gf & GOAL_AT_AI) ? "G H\n" : "G A\n");
+      uint8_t human_scored = (gf & GOAL_AT_AI) != 0;
+      PLAY(human_scored ? SND_GOAL_HUMAN : SND_GOAL_AI);
+      uart_puts(human_scored ? "G H\n" : "G A\n");
     }
 
     if (now >= next_hello) {
