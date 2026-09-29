@@ -18,6 +18,7 @@ function connect() {
   es.onerror = () => { $('offline').classList.remove('hidden'); };
 }
 connect();
+document.querySelector('#caption .skip').onclick = () => sendKey('Tab');
 
 const NO_DEFAULT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Enter', 'F1', 'Tab'];
 addEventListener('keydown', e => {

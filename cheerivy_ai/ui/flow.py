@@ -222,6 +222,14 @@ class Flow:
         self.script, self.then = list(steps), then
         self._step()
 
+    def skip_line(self):
+        """Skip the line being said right now (just that one): the next step of the script follows at once."""
+        self._hook("hush")
+        self.caption_until = 0.0
+        self.quiet_from = self.now
+        if self.script is not None:
+            self.step_end = self.now
+
     def _stop_script(self):
         self.script, self.then = None, None
 
@@ -782,6 +790,8 @@ class Flow:
     def event(self, ev, now):
         self.now, self.last_input = now, now
         kind, *a = ev
+        if kind == "skip":
+            return self.skip_line()
         if kind == "calib":
             return self._calibrate(a[0])
         if kind == "calib_done":

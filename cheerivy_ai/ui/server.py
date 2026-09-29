@@ -51,7 +51,7 @@ SIM_KEYS = {
     "ArrowRight": ("dir", 2, "R"), "Enter": ("btn", 2), "NumpadEnter": ("btn", 2), "Backspace": ("back", 2),
     "KeyH": ("pause",), "KeyG": ("goal", 1), "KeyK": ("goal", 2),
 }
-ORGANISER_KEYS = {"Escape": ("home",), "F1": ("settings",)}
+ORGANISER_KEYS = {"Escape": ("home",), "F1": ("settings",), "Tab": ("skip",), "KeyN": ("skip",)}
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("text/javascript", ".js")
 

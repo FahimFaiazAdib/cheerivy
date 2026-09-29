@@ -523,3 +523,8 @@ body.match-on.live-on #caption { bottom: 80px; }
 #overlay { pointer-events: none; }            /* never in the way of the calibration clicks */
 body.cal-on #caption { left: 390px; bottom: 70px; max-width: 580px; padding: 18px 24px; }
 body.cal-on #caption .txt { font-size: 24px; }
+#caption .skip { flex: none; align-self: center; margin-left: 8px; cursor: pointer; padding: 10px 14px 8px; border-radius: 10px;
+  font: 800 20px/1 var(--display); letter-spacing: .14em; color: var(--dim); background: transparent; border: 2px solid var(--line-hi); }
+#caption .skip:hover { color: var(--ink); border-color: var(--ink); }
+#caption .skip kbd { font: 600 13px/1 var(--mono); opacity: .6; margin-left: 4px; }
+#caption.off .skip { pointer-events: none; }
