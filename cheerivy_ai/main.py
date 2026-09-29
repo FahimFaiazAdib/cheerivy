@@ -298,9 +298,12 @@ def main():
                 link.send("F")
             mcu_lines = link.read_lines() + (source.pop_lines() if args.sim else [])
             for line in mcu_lines:
-                if live and line.startswith("G ") and goals:
-                    goals = None
-                    print("[goal] the robot's goal sensors work -> camera goal detection OFF")
+                if live and line.startswith("G "):
+                    if not C.LASER_GOALS:
+                        continue                    # lasers not wired yet: noise, not a goal
+                    if goals:
+                        goals = None
+                        print("[goal] the robot's goal sensors work -> camera goal detection OFF")
                 if live and live.on_line(line):
                     continue
                 if line.startswith(("P1SERVO", "P2SERVO")):

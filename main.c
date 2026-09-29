@@ -419,6 +419,7 @@ static volatile char rx_move = 'S';
 static volatile uint8_t rx_fire, rx_freeze;
 static volatile uint32_t rx_last_ms;
 static volatile uint8_t rx_seen;
+static volatile uint8_t rx_echo = 1;    /* echo moves back to the laptop (not in screen mode: it doesn't need them) */
 static volatile uint8_t rx_game = 1;    /* '1' / '2' / '3' from the laptop menu: vs AI, two players, AI vs AI */
 static volatile char rx_move1 = 'M';    /* AI vs AI: the laptop's move for player 1 ('B' 'N' 'M') */
 static volatile uint8_t rx_fire1, rx_freeze1;
@@ -477,12 +478,18 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
   }
   rx_last_ms = g_ms;
   rx_seen = 1;
-  if (echo && (UCSRA & (1 << UDRE))) UDR = c | 0x20;  /* lowercase echo, so the laptop can check the link */
+  if (echo && rx_echo && (UCSRA & (1 << UDRE))) UDR = c | 0x20;  /* lowercase echo, so the laptop can check the link */
 }
 
 static void uart_putc(char c) {
-  while (!(UCSRA & (1 << UDRE))) {}
-  UDR = c;
+  /* Check and write with interrupts off: the receive interrupt also writes UDR (the echo), and if
+     it slipped in between, this byte would be written into a full buffer and lost. */
+  for (;;) {
+    uint8_t sreg = SREG;
+    cli();
+    if (UCSRA & (1 << UDRE)) { UDR = c; SREG = sreg; return; }
+    SREG = sreg;
+  }
 }
 
 static void uart_puts(const char *s) { while (*s) uart_putc(*s++); }
@@ -863,6 +870,7 @@ static void screen_game(void) {
   motor_ai(0);
   motor_human(0);
   goal_flags_take();
+  rx_echo = 0;
   for (;;) {
     uint32_t now = millis();
     buzz_update(now);
@@ -957,7 +965,7 @@ static void screen_game(void) {
     /* goals: beep and report them (the laptop keeps the score). Only while the ball is in play:
        placing the ball for a restart must not count. */
     uint8_t gf = goal_flags_take();
-    if (gf && play && now >= goal_ready_at) {
+    if (gf && play && game != 4 && now >= goal_ready_at) {   /* (no goals in the motor test) */
       goal_ready_at = now + GOAL_LOCKOUT_MS;
       uint8_t human_scored = (gf & GOAL_AT_AI) != 0;
       PLAY(human_scored ? SND_GOAL_HUMAN : SND_GOAL_AI);
