@@ -50,4 +50,4 @@ The page is a fixed 1920×1080 stage, scaled to fit, so it looks the same on the
   carriage's tape / right-click the ball on the top-down picture (`POST /sample`).
 
 ## Still to do
-- Real replays in the highlights reel. LCD 16×2 text.
+- LCD 16×2 text. (Goal replays: live.py keeps 5 s before + 1.5 s after each goal, `GET /replay?i=N`; the simulator shows cards only.)

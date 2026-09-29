@@ -27,6 +27,7 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
@@ -71,6 +72,7 @@ class Hub:
         self.vcond = threading.Condition()          # camera pictures (JPEG): /video top-down, /raw as filmed
         self.frames = {"video": (None, 0), "raw": (None, 0)}
         self.posts = {}                             # live: "/calib", "/sample" -> fn(data) (clicks on the page)
+        self.gets = {}                              # live: "/replay" -> fn(query) -> (content type, bytes) or None
 
     def set_video(self, jpg, which="video"):
         with self.vcond:
@@ -140,6 +142,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._events()
         if path in ("/video", "/raw"):
             return self._video(path[1:])
+        if path in self.hub.gets:
+            got = self.hub.gets[path](parse_qs(urlparse(self.path).query))
+            if not got:
+                self.send_error(404)
+                return
+            ctype, body = got
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
         full = os.path.normpath(os.path.join(WEB, rel))
         if not full.startswith(WEB) or not os.path.isfile(full):

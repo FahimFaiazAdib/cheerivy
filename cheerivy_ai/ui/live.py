@@ -7,9 +7,12 @@ The new browser game, played for real: main.py (camera AI + robot link) runs it 
     Flow   -> decides everything (menus, clock, goals, commentary); main.py lets the AI play only
               while the Flow says the ball is live.
 """
+import base64
+import json
 import os
 import sys
 import time
+from collections import deque
 
 import cv2
 
@@ -26,6 +29,9 @@ LEVEL = {"EASY": 1, "MEDIUM": 2, "HARD": 3}
 VIDEO_FPS = 15
 VIDEO_QUALITY = 70
 INPUT = {"L": "L", "R": "R", "U": "U", "D": "D"}
+REPLAY_BEFORE_S = 5.0      # a goal's replay: this long before the goal ...
+REPLAY_AFTER_S = 1.5       # ... and this long after it
+REPLAY_KEYS = ("ball", "path", "path1", "ai_x", "p1_x", "ai_box", "p1_box")   # what the AI saw, per frame
 
 
 class LiveGame:
@@ -46,6 +52,10 @@ class LiveGame:
         self.calib = None                # the page's corner clicks: {"points": [[x, y] x4]} or "cancel"
         self.samples = []                # the page's colour clicks: (what, x, y) on the top-down picture
         self._last_raw = 0.0
+        self.rec = deque()               # the last REPLAY_BEFORE_S of (time, jpeg, what the AI saw)
+        self.clips = {}                  # goal number -> {"goal_t", "frames"} for the highlights
+        self._clip, self._goals_seen = None, 0
+        self.hub.gets["/replay"] = self._replay_get
         self.hub.posts.update({"/calib": self._calib_post, "/sample": self._sample_post})
         self.debug = False               # Settings > Debug > Motor & striker test is open
         self.manual = {1: ("S", 0.0), 2: ("S", 0.0)}   # debug keyboard moves: (L/R/S, until)
@@ -171,12 +181,47 @@ class LiveGame:
             ok, jpg = cv2.imencode(".jpg", pic, [cv2.IMWRITE_JPEG_QUALITY, VIDEO_QUALITY])
             if ok:
                 self.hub.set_video(jpg.tobytes())
+                self._record(now, jpg.tobytes(), board)
         events = []
         if self.in_play():
             self.watcher.slope = tuple(slope)
             events = self.watcher.update(stamp, board.get("ball"), board.get("vel"),
                                          {1: board.get("p1_x"), 2: board.get("ai_x")})
         self.hub.feed(board, events)
+
+    # ------------------------------------------------------------ replays (highlights)
+    def _record(self, now, jpg, board):
+        """Keep the last seconds of picture + what the AI saw; at a goal, keep them as its replay."""
+        entry = (now, jpg, {k: board.get(k) for k in REPLAY_KEYS})
+        self.rec.append(entry)
+        while self.rec and now - self.rec[0][0] > REPLAY_BEFORE_S:
+            self.rec.popleft()
+        n = len(self.flow.goals)
+        if n < self._goals_seen:                    # a new match: forget the old replays
+            self.clips, self._clip = {}, None
+        elif n > self._goals_seen:                  # a goal: its replay starts 5 s back
+            self._clip = {"i": n - 1, "goal_t": now, "frames": list(self.rec), "until": now + REPLAY_AFTER_S}
+        elif self._clip:
+            self._clip["frames"].append(entry)
+        self._goals_seen = n
+        if self._clip and now >= self._clip["until"]:
+            c = self._clip
+            self.clips[c["i"]] = {"goal_t": c["goal_t"], "frames": c["frames"]}
+            self._clip = None
+
+    def _replay_get(self, query):
+        """GET /replay?i=<goal number> -> the clip as JSON (pictures as base64 JPEG), or None."""
+        try:
+            c = self.clips.get(int(query.get("i", ["-1"])[0]))
+        except ValueError:
+            c = None
+        if not c:
+            return None
+        t0 = c["frames"][0][0]
+        frames = [{"t": round(t - t0, 3), "img": base64.b64encode(j).decode(), "b": b} for t, j, b in c["frames"]]
+        body = {"goal_t": round(c["goal_t"] - t0, 3), "margin": C.VIEW_MARGIN_CM,
+                "w": C.ARENA_W, "h": C.ARENA_H, "frames": frames}
+        return "application/json", json.dumps(body, separators=(",", ":")).encode()
 
     # ------------------------------------------------------------ game -> robot
     def _robot(self, cmd):

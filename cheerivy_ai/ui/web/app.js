@@ -254,10 +254,15 @@ const SCREENS = {
     <div class="screen hl">
       <div class="head"><div class="kicker">FULL TIME · ${esc(S.names[1])} ${S.score[0]} – ${S.score[1]} ${esc(S.names[2])}</div>
         <div class="question">Highlights</div></div>
-      <div class="reel"><div class="scan"></div><div class="rec"><i></i>REPLAY</div><div id="hl-card"></div></div>
+      <div class="reel"><canvas id="hl-cv"></canvas><div class="scan"></div><div class="rec"><i></i>REPLAY</div><div id="hl-card"></div>
+        <div class="hl-legend"><small>THE AI'S VIEW</small>
+          <div><i class="ln p2"></i>Where ${S.mode === 'aivai' ? esc(S.names[2]) : 'the AI'} expected the ball to go</div>
+          ${S.mode === 'aivai' ? `<div><i class="ln p1"></i>Where ${esc(S.names[1])} expected it</div>` : ''}
+          <div><i class="ring"></i>The ball, as the camera saw it</div><div class="slow">SLOW MOTION ×${HL_SPEED}</div></div></div>
       <div class="timeline"><div class="track"></div>${dots}</div>
     </div>`, root => {
       const i = S.highlight.index, card = root.querySelector('#hl-card');
+      hlShow(root, i === null || i === undefined ? null : i);
       root.querySelectorAll('[data-g]').forEach(e => e.classList.toggle('on', +e.dataset.g === i));
       if (i === null || i === undefined) {
         mount(card, 'end', `<div class="card-hl"><small>${g.length ? 'THAT\'S ALL' : 'NO GOALS TODAY'}</small><b>FROM CHEERIVY</b></div>`);
@@ -269,6 +274,78 @@ const SCREENS = {
     }];
   },
 };
+
+// ------------------------------------------------------------------ highlights: goal replays
+// The laptop keeps ~5 s before and 1.5 s after every goal: the camera picture and, frame by frame,
+// what the AI saw (the ball, its predicted path). Played here in slow motion with that drawn on top.
+const HL_SPEED = 0.6;
+const REPLAYS = {};                              // "<goal>:<time>:<scorer>" -> {status, d, imgs}
+let hlNow = null, hlT0 = 0, hlRaf = 0;
+function replay(i) {
+  const g = S.goals[i], key = `${i}:${g.at}:${g.scorer}`;
+  if (!REPLAYS[key]) {
+    const r = REPLAYS[key] = { status: 'loading' };
+    fetch('/replay?i=' + i).then(x => (x.ok ? x.json() : Promise.reject())).then(d => {
+      r.d = d; r.imgs = d.frames.map(f => { const im = new Image(); im.src = 'data:image/jpeg;base64,' + f.img; return im; });
+      r.status = 'ok';
+    }).catch(() => { r.status = 'none'; setTimeout(() => { if (REPLAYS[key] === r) delete REPLAYS[key]; }, 1500); });
+  }
+  return REPLAYS[key];
+}
+function hlShow(root, i) {
+  if (i !== hlNow) { hlNow = i; hlT0 = performance.now(); }
+  if (!hlRaf) hlRaf = requestAnimationFrame(hlTick);
+}
+function hlTick() {
+  hlRaf = 0;
+  const cv = document.getElementById('hl-cv'), el = document.querySelector('.hl');
+  if (!cv || !el || !S || S.screen !== 'highlights') return;
+  hlRaf = requestAnimationFrame(hlTick);
+  const r = hlNow === null ? null : replay(hlNow), ok = r && r.status === 'ok' && r.imgs.length;
+  el.classList.toggle('replay', !!ok);
+  if (!ok) return;
+  const k = 2, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w * k) { cv.width = w * k; cv.height = h * k; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(k, 0, 0, k, 0, 0); ctx.clearRect(0, 0, w, h);
+  const d = r.d, F = d.frames, span = F[F.length - 1].t + 0.6;          // loop, with a short hold at the end
+  const t = ((performance.now() - hlT0) / 1000 * HL_SPEED) % span;
+  let n = 0; while (n + 1 < F.length && F[n + 1].t <= t) n++;
+  const im = r.imgs[n]; if (!im.naturalWidth) return;
+  const s = Math.min(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * s, ih = im.naturalHeight * s;
+  const x0 = (w - iw) / 2, y0 = (h - ih) / 2, M = d.margin;
+  const P = (x, y) => [x0 + (x + M) / (d.w + 2 * M) * iw, y0 + (y + M) / (d.h + 2 * M) * ih];
+  const cm = iw / (d.w + 2 * M);
+  ctx.save(); ctx.beginPath(); ctx.roundRect(x0, y0, iw, ih, 14); ctx.clip();
+  ctx.drawImage(im, x0, y0, iw, ih);
+  ctx.fillStyle = 'rgba(4,8,16,.22)'; ctx.fillRect(x0, y0, iw, ih);
+  const b = F[n].b || {}, after = F[n].t >= d.goal_t;
+  [[b.path, '#1fd5f5'], [b.path1, '#ff5b2e']].forEach(([path, col]) => {        // the AI's thinking
+    if (!path || path.length < 2) return;
+    ctx.save(); ctx.setLineDash([12, 9]); ctx.strokeStyle = col; ctx.lineWidth = 3.5; ctx.shadowColor = col; ctx.shadowBlur = 12;
+    ctx.beginPath(); path.forEach(([x, y], j) => { const [X, Y] = P(x, y); j ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
+    ctx.setLineDash([]); const [X, Y] = P(...path[path.length - 1]);
+    ctx.beginPath(); ctx.arc(X, Y, 14, 0, 7); ctx.stroke(); ctx.restore();
+  });
+  const trail = [];                                                           // the ball's last half second
+  for (let j = n; j >= 0 && F[n].t - F[j].t < 0.5; j--) if (F[j].b && F[j].b.ball) trail.push(F[j].b.ball);
+  trail.reverse().forEach(([x, y], j) => { const [X, Y] = P(x, y); ctx.fillStyle = `rgba(255,200,110,${(j + 1) / trail.length * .35})`;
+    ctx.beginPath(); ctx.arc(X, Y, cm * 1.4, 0, 7); ctx.fill(); });
+  if (b.ball) {
+    const [X, Y] = P(...b.ball);
+    ctx.save(); ctx.strokeStyle = '#ffd08a'; ctx.lineWidth = 3; ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.arc(X, Y, cm * 2 + 7, 0, 7); ctx.stroke(); ctx.restore();
+  }
+  if (after) {                                                                // the goal moment
+    const a = Math.min(1, (F[n].t - d.goal_t) * 3);
+    ctx.fillStyle = `rgba(255,200,61,${.18 * a})`; ctx.fillRect(x0, y0, iw, ih);
+    ctx.save(); ctx.globalAlpha = a; ctx.font = 'italic 900 90px "Barlow Condensed", Impact, sans-serif';
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 20;
+    ctx.fillText('GOAL', x0 + iw / 2, y0 + ih / 2 + 30); ctx.restore();
+  }
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(200,225,255,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x0, y0, iw, ih, 14); ctx.stroke();
+}
 
 // ------------------------------------------------------------------ match (board + scorebug)
 let prevScore = [0, 0];

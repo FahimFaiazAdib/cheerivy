@@ -529,3 +529,24 @@ body.cal-on #caption .txt { font-size: 24px; }
 #caption .skip kbd { font: 600 13px/1 var(--mono); opacity: .6; margin-left: 4px; }
 #caption.off .skip { pointer-events: none; }
 #caption.no-skip .skip { visibility: hidden; }     /* the buzzer rule can't be skipped */
+
+/* ------------------------------------------------------------ highlights with goal replays */
+.hl .reel canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+.hl .hl-legend { display: none; }
+.hl.replay .reel { top: 250px; height: 570px; justify-content: flex-start; }
+.hl.replay .head { top: 60px; } .hl.replay .head .question { font-size: 100px; }
+.hl.replay .reel canvas { display: block; }
+.hl.replay .reel .scan { opacity: .4; }
+.hl.replay #hl-card { position: absolute; left: 60px; top: 50%; translate: 0 -50%; max-width: 480px; }
+.hl.replay .card-hl { text-align: left; }
+.hl.replay .card-hl small { font-size: 24px; letter-spacing: .25em; }
+.hl.replay .card-hl b { font-size: 104px; }
+.hl.replay .card-hl .sc { font-size: 60px; }
+.hl.replay .hl-legend { display: grid; gap: 14px; position: absolute; right: 60px; top: 50%; translate: 0 -50%; width: 400px;
+  font: 600 22px/1.3 var(--body); color: var(--ink); }
+.hl-legend small { font: 800 22px/1 var(--display); letter-spacing: .3em; color: var(--dim); margin-bottom: 4px; }
+.hl-legend div { display: flex; align-items: center; gap: 14px; }
+.hl-legend .ln { flex: none; width: 44px; height: 0; border-top: 4px dashed; }
+.hl-legend .ln.p2 { border-color: var(--p2); } .hl-legend .ln.p1 { border-color: var(--p1); }
+.hl-legend .ring { flex: none; width: 26px; height: 26px; margin: 0 9px; border-radius: 50%; border: 3px solid #ffd08a; box-shadow: 0 0 10px #ffb347; }
+.hl-legend .slow { margin-top: 10px; font: 800 20px/1 var(--mono); letter-spacing: .2em; color: var(--gold); }
