@@ -290,19 +290,22 @@ static volatile uint8_t df_vol_req;     /* volume + 1 */
 static volatile uint8_t h_rest_req, h_strike_req, h_test_req;   /* player 1 servo tuning, value + 1 */
 static uint8_t df_booted;
 
+/* 9600 baud = 104.2 us per bit. The loop itself takes ~1.3 us per bit at 8 MHz, so the delay is
+   103 us (measured from the compiled code: ~836 cycles = 104.5 us per bit). */
+#define DF_BIT_US 103
 static void df_byte(uint8_t b) {        /* ~1 ms with interrupts off: the UART hardware holds 2 bytes meanwhile */
   uint8_t sreg = SREG;
   cli();
   DF_PORT &= ~(1 << DF_BIT);            /* start bit */
-  _delay_us(104);
+  _delay_us(DF_BIT_US);
   for (uint8_t i = 0; i < 8; i++) {
     if (b & 1) DF_PORT |= (1 << DF_BIT); else DF_PORT &= ~(1 << DF_BIT);
     b >>= 1;
-    _delay_us(104);
+    _delay_us(DF_BIT_US);
   }
   DF_PORT |= (1 << DF_BIT);             /* stop bit */
   SREG = sreg;
-  _delay_us(104);
+  _delay_us(DF_BIT_US);
 }
 
 static void df_send(uint8_t cmd, uint16_t arg) {
