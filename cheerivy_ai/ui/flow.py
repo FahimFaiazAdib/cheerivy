@@ -24,8 +24,11 @@ Hooks (all optional, dict of callables):
 import json
 import os
 import random
+import sys
 
-from commentary import MINUTES, Commentary
+sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config as C  # noqa: E402
+from commentary import MINUTES, Commentary  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
@@ -54,6 +57,7 @@ RALLY_CALLS = {5: "rally_5", 8: "rally_8", 12: "rally_12"}   # then 17, 22, ...:
 MATCH_SCREENS = ("prematch", "ready", "countdown", "live", "goal")
 
 # (group, key, label, choices (None = action), default)
+OFFSETS = tuple(x / 2 for x in range(-12, 13))       # -6 .. +6 cm in 0.5 cm steps
 SETTINGS = [
     ("Sound", "voice_vol", "Commentary volume", tuple(range(11)), 8),
     ("Sound", "crowd_vol", "Crowd volume", tuple(range(11)), 5),
@@ -77,6 +81,8 @@ SETTINGS = [
     ("Camera & AI", "swap_lr", "Swap L/R (AI carriage)", (True, False), True),
     ("Camera & AI", "swap_lr_p1", "Swap L/R (player 1, AI vs AI)", (False, True), False),
     ("Camera & AI", "debug", "AI debug overlay", (False, True), False),
+    ("Camera & AI", "off_ai", "Striker offset, AI side (cm)", OFFSETS, C.STRIKER_OFFSET_AI_CM),
+    ("Camera & AI", "off_p1", "Striker offset, player 1 (cm)", OFFSETS, C.STRIKER_OFFSET_P1_CM),
     ("Debug", "motor_test", "Motor & striker test", None, None),
 ]
 TALK_SCREENS = ("prematch", "goal", "fulltime", "highlights")   # pressing a stick in skips the talk

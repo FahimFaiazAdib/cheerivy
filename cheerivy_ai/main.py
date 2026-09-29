@@ -201,6 +201,7 @@ def main():
 
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()
+    last_off = (0.0, 0.0)
 
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
     if not args.no_show and not live:
@@ -250,6 +251,19 @@ def main():
             flat = cal.warp(frame)
             flat_clean = flat.copy() if (show or live) else None
             ball, carriage_x, p1_x = tracker.process(flat)
+            # the tape the camera follows -> the striker (Settings > Camera & AI > Striker offset)
+            if live:
+                off = (live.flow.settings["off_ai"], live.flow.settings["off_p1"])
+            else:                                   # (the simulator's strikers sit under the tape)
+                off = (0.0, 0.0) if args.sim else (C.STRIKER_OFFSET_AI_CM, C.STRIKER_OFFSET_P1_CM)
+            if off != last_off:                     # the rail limits move with it
+                for c, d in ((ctrl, off[0] - last_off[0]), (ctrl1, off[1] - last_off[1])):
+                    c.rail_lo, c.rail_hi = c.rail_lo + d, c.rail_hi + d
+                last_off = off
+            if carriage_x is not None:
+                carriage_x += off[0]
+            if p1_x is not None:
+                p1_x += off[1]
             if ball:
                 pred.update(stamp, *ball)
             elif pred.hist and stamp - pred.hist[-1][0] > 0.25:

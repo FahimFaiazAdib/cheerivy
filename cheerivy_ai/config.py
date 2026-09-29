@@ -16,6 +16,11 @@ BASE_W = 38.0           # measured: inner width of the straight AI baseline wall
 CARRIAGE_GAP = 38.0     # measured: AI carriage front face -> P1 carriage front face
 CARRIAGE_DEPTH = 4.0    # measured: baseline wall -> carriage front face
 CARRIAGE_W = 10.0       # measured: carriage width (left-right)
+# The striker is not always centred under the tape the camera follows (and from the side a raised
+# tape looks shifted). striker centre = tape centre + this, in cm (+ = to the right in the picture).
+# Starting values from a photo of the robot; tune them in Settings > Camera & AI.
+STRIKER_OFFSET_AI_CM = -2.0
+STRIKER_OFFSET_P1_CM = -2.0
 ARENA_H = CARRIAGE_GAP + 2 * CARRIAGE_DEPTH   # baseline to baseline
 CHAMFER_DX = 0.0        # the board is a plain rectangle now (was 9.0 on the old octagon board)
 CHAMFER_DY = 0.0        # (was 10.0)
