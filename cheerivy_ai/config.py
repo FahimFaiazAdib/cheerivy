@@ -19,7 +19,7 @@ CARRIAGE_W = 10.0       # measured: carriage width (left-right)
 # The striker is not always centred under the tape the camera follows (and from the side a raised
 # tape looks shifted). striker centre = tape centre + this, in cm (+ = to the right in the picture).
 # Starting values from a photo of the robot; tune them in Settings > Camera & AI.
-STRIKER_OFFSET_AI_CM = -2.0
+STRIKER_OFFSET_AI_CM = -1.0   # the green (AI side) striker is closer to its tape than the blue one
 STRIKER_OFFSET_P1_CM = -2.0
 ARENA_H = CARRIAGE_GAP + 2 * CARRIAGE_DEPTH   # baseline to baseline
 CHAMFER_DX = 0.0        # the board is a plain rectangle now (was 9.0 on the old octagon board)
