@@ -275,6 +275,7 @@ static void wait_ms(uint32_t ms) {      /* blocking wait that keeps sounds and p
      "A<n>;"  play /ADVERT/<n>.mp3 on top: the main track pauses and carries on afterwards
               (commentary with crowd mixed in)                          "A0;" = stop the advert
      "V<n>;"  volume 0..30
+     "X<c>;"  raw DFPlayer command c with no number (test: X1; = next track, like touching IO2)
    DFPlayer RX <- PA5 / pin 35 through a 1k resistor. Software serial, 9600 8N1, send only. */
 #define DF_PORT PORTA
 #define DF_DDR  DDRA
@@ -286,6 +287,7 @@ static volatile uint8_t df_cmd;         /* 'P' or 'V' while its number is arrivi
 static volatile uint16_t df_num;
 static volatile uint16_t df_play_req;   /* track + 1 (0 = nothing waiting) */
 static volatile uint16_t df_adv_req;    /* advert + 1 */
+static volatile uint8_t df_raw_req;     /* raw command + 1 */
 static volatile uint8_t df_vol_req;     /* volume + 1 */
 static volatile uint8_t h_rest_req, h_strike_req, h_test_req;   /* player 1 servo tuning, value + 1 */
 static uint8_t df_booted;
@@ -363,13 +365,15 @@ static void df_update(uint32_t now) {   /* called from the main loops (via buzz_
     df_booted = 1;
     df_send(0x06, DF_VOLUME_DEFAULT);
   }
-  uint8_t v; uint16_t p, a;
+  uint8_t v, x; uint16_t p, a;
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
     v = df_vol_req; df_vol_req = 0;
+    x = df_raw_req; df_raw_req = 0;
     p = df_play_req; df_play_req = 0;
     a = df_adv_req; df_adv_req = 0;
   }
   if (v) df_send(0x06, v - 1 > 30 ? 30 : v - 1);
+  if (x) df_send(x - 1, 0);
   if (p == 1) df_send(0x16, 0);                     /* "P0;" = stop */
   else if (p) df_send(0x12, p - 1);                 /* play /MP3/<n>.mp3 */
   if (a == 1) df_send(0x15, 0);                     /* "A0;" = stop the advert, back to the main track */
@@ -402,6 +406,7 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
       if (df_cmd == 'P') df_play_req = df_num + 1;
       else if (df_cmd == 'A') df_adv_req = df_num + 1;
       else if (df_cmd == 'V') df_vol_req = df_num + 1;
+      else if (df_cmd == 'X') { if (df_num < 255) df_raw_req = df_num + 1; }
       else if (df_num <= 180) {
         if (df_cmd == 'H') h_rest_req = df_num + 1;
         else if (df_cmd == 'J') h_strike_req = df_num + 1;
@@ -412,7 +417,7 @@ ISR(USART_RXC_vect) {                   /* keep this tiny: no delays, no sounds 
     if (c == ';') return;               /* anything else: a lost ';' — treat c as a normal byte */
   }
   switch (c) {
-    case 'P': case 'A': case 'V': case 'H': case 'J': case 'U': df_cmd = c; df_num = 0; return;
+    case 'P': case 'A': case 'V': case 'X': case 'H': case 'J': case 'U': df_cmd = c; df_num = 0; return;
     case 'L': case 'R': case 'S': rx_move = c; break;
     case 'F': rx_fire = 1; break;
     case 'Z': rx_freeze = 1; break;

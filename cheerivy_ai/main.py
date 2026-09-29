@@ -12,7 +12,8 @@ CHEERIVY — Vision AI (Layer B)
 Keys:  space start/pause AI (starts PAUSED)   a / d drive carriage by hand (while paused)
        x swap left/right   1/2/3 difficulty   f test-fire   z freeze   c recalibrate   q quit
        player 1 servo (saved on the robot):  [ / ]  rest angle -/+ 1    - / =  swing smaller / bigger
-       m  robot speaker test (DFPlayer): crowd + a new commentary clip every 5 s; m again = stop
+       m  robot speaker test (DFPlayer): a commentary clip from /MP3 every 5 s; m again = stop
+       n  DFPlayer "next track" (same as touching its IO2 pin to GND)
        , / .  robot speaker volume down / up (0..30)
                                              /  test strike
 Mouse, in the right-hand (top-down) view: LEFT-click the carriage tape to lock its colour,
@@ -181,8 +182,8 @@ def main():
             if sound_test and now >= sound_next_t:
                 n = test_clips[sound_i % len(test_clips)]
                 sound_i += 1
-                link.send(f"A{n};")
-                print(f"[sound] playing /ADVERT/{n:04d}.mp3 over the crowd")
+                link.send(f"P{n};")
+                print(f"[sound] playing /MP3/{n:04d}.mp3")
                 sound_next_t = now + 5.0
             if not p1_asked and link.ser and not args.sim:
                 p1_asked = True
@@ -260,13 +261,17 @@ def main():
                 link.send(f"V{df_volume};")
                 print(f"[sound] robot speaker volume {df_volume} / 30")
                 continue
+            if k == ord("n") and not (show and show.phase == "NAMES"):
+                link.send(f"V{df_volume};")
+                link.send("X1;")
+                print("[sound] DFPlayer: next track (like touching IO2)")
+                continue
             if k == ord("m") and not (show and show.phase == "NAMES"):
                 sound_test = not sound_test
                 if sound_test:
                     link.send(f"V{df_volume};")
-                    link.send(f"P{crowd_n};")
-                    sound_next_t = time.time() + 2.0
-                    print(f"[sound] test ON: crowd = /MP3/{crowd_n:04d}.mp3, then a clip every 5 s (m = stop)")
+                    sound_next_t = time.time() + 0.5
+                    print(f"[sound] test ON: a commentary clip from /MP3 every 5 s, volume {df_volume} (m = stop)")
                 else:
                     link.send("P0;")
                     print("[sound] test OFF")
