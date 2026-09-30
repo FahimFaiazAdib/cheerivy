@@ -191,12 +191,16 @@ class Flow:
 
     def _L(self, moment, **kw):
         """A script step that speaks one commentary line (see commentary.py)."""
-        key, text = self.cm.line(moment, **kw)
-        return (text, key, None)
+        res = self.cm.line(moment, **kw)
+        if res:
+            key, text = res
+            return (text, key, None)
+        return ("", None, 1.0)
 
     def _speak(self, moment, index=None, **kw):
-        key, text = self.cm.line(moment, index, **kw)
-        self._say(key, text)
+        res = self.cm.line(moment, index, **kw)
+        if res:
+            self._say(*res)
 
     def _busy(self):
         f = self.hooks.get("voice_busy")
@@ -674,7 +678,10 @@ class Flow:
                 or self.now - self.go_until < 1.0):
             return
         self.last_short = self.now
-        key, text = self.cm.line(moment)
+        res = self.cm.line(moment)
+        if not res:
+            return
+        key, text = res
         n = self._hook("say", key, text) if self.settings["commentary"] else None
         self.caption, self.caption_until = text, self.now + (n or estimate(text)) + 0.5
 
@@ -745,9 +752,16 @@ class Flow:
                     call()
 
     def _half_time_call(self):
-        k1, t1 = self.cm.line("clk_half")
-        k2, t2 = self._score_line()
-        self._say(f"{k1}+{k2}", f"{t1} {t2}")         # two clips, played back to back
+        res1 = self.cm.line("clk_half")
+        res2 = self._score_line()
+        if res1 and res2:
+            k1, t1 = res1
+            k2, t2 = res2
+            self._say(f"{k1}+{k2}", f"{t1} {t2}")         # two clips, played back to back
+        elif res1:
+            self._say(*res1)
+        elif res2:
+            self._say(*res2)
 
     def _time_up(self):
         self.running = False

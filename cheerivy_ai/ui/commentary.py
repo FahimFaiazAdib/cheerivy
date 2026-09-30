@@ -300,9 +300,13 @@ class Commentary:
                 k, t = self._written(moment, i, o, kw)
                 made[i] = ((k, t), self.bank.part(k)[0] is not None)
         if not made:
+            if moment == "countdown" and index is not None:
+                return f"cd_0{3 - index}", str(3 - index)
             return None                           # only recordings, and none of them fits
-        if index is not None and index in made:
-            return made[index][0]
+        if index is not None:
+            if index in made:
+                return made[index][0]
+            return (f"cd_0{3 - index}", str(3 - index)) if moment == "countdown" else None
         voiced = [i for i, (_, has_sound) in made.items() if has_sound]
         pool = voiced or list(made)
         choices = [i for i in pool if i != self._last.get(moment)] or pool
