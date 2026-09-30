@@ -43,7 +43,7 @@ def _sample(flat_img, x_px, y_px):
 
 
 def _said(msg):
-    return _said(f"{msg}")
+    print(f"[tracker] {msg}")
     return msg
 
 class Tracker:
