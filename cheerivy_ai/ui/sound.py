@@ -78,23 +78,31 @@ class Sound:
         """Call every tick: moves the crowd volume toward where it should be."""
         if not self.ok:
             return
-        target = BED_VOL + (BED_TENSE - BED_VOL) * self.tension
-        if now < self.swell_until:
-            target = BED_TENSE + 0.2
-        if self.busy:
-            target = min(target, BED_DUCK + 0.3 * self.tension)
-        step = BED_RAMP * dt
-        self.bed_level += max(-step, min(step, target - self.bed_level))
-        self.bed.set_volume(min(1.0, self.bed_level * self.crowd_vol * 2))
-        with self._lock:                                   # next clip of a sequence
-            if self._queue and not self.voice.get_busy():
-                self.voice.play(self._queue.pop(0))
-                self.voice.set_volume(self.voice_vol)
+        try:
+            target = BED_VOL + (BED_TENSE - BED_VOL) * self.tension
+            if now < self.swell_until:
+                target = BED_TENSE + 0.2
+            if self.busy:
+                target = min(target, BED_DUCK + 0.3 * self.tension)
+            step = BED_RAMP * dt
+            self.bed_level += max(-step, min(step, target - self.bed_level))
+            self.bed.set_volume(min(1.0, self.bed_level * self.crowd_vol * 2))
+            with self._lock:                                   # next clip of a sequence
+                if self._queue and not self.voice.get_busy():
+                    self.voice.play(self._queue.pop(0))
+                    self.voice.set_volume(self.voice_vol)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ voice
     @property
     def busy(self):
-        return self.ok and (bool(self._queue) or self.voice.get_busy())
+        if not self.ok:
+            return False
+        try:
+            return bool(self._queue) or (self.pg.mixer.get_init() is not None and self.voice.get_busy())
+        except Exception:
+            return False
 
     def say(self, key, text):
         """Play a line now. Returns its length in seconds when it's recorded, else None."""

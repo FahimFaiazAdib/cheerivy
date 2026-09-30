@@ -111,7 +111,7 @@ NEAR_BALL_CM = 4.0      # a slow ball this close in front of the AI line: go to 
 HEARTBEAT_S = 0.1       # resend current command this often (firmware falls back to Mirror AI after 400 ms)
 ROBOT_VOLUME = 14      # robot speaker (DFPlayer) volume 0..30; the PAM8610 amp has no knob, so set it here
 CAMERA_GOALS = True     # count goals from the camera (turns itself off when the laser sensors report one)
-LASER_GOALS = True      # True: laser break-beam sensors on PD2 (INT0 / Pin 16) and PD3 (INT1 / Pin 17) count goals
+LASER_GOALS = False     # False: count goals safely with camera vision (avoids dangling wire false goals)
 SWAP_LR = True          # True if the carriage drives the WRONG way (press 'x' live to test)
 SWAP_LR_P1 = False      # the same for PLAYER 1's carriage in AI vs AI (fixes itself if it drives the wrong way)
 
