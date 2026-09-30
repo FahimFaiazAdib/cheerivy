@@ -12,6 +12,8 @@ Returns positions in CENTIMETRES. In the top-down view of the main window:
                                   (top half = AI carriage, bottom half = player 1's carriage)
   RIGHT-click the ball         -> re-sample the ball's colour
 """
+import json
+
 import cv2
 import numpy as np
 
@@ -41,7 +43,7 @@ def _sample(flat_img, x_px, y_px):
 
 
 def _said(msg):
-    print(f"[tracker] {msg}")
+    return _said(f"{msg}")
     return msg
 
 class Tracker:
@@ -95,6 +97,28 @@ class Tracker:
             return _said(f"That's white or grey (H={h} S={s} V={v}). Right-click ON the ball.")
         self.ball_ranges = _hue_ranges(h, s, v, 8)
         return _said(f"Ball colour learned (H={h} S={s} V={v}).")
+
+    # ---- taught colours (Settings > Re-teach colours) are kept in a file, so they survive a restart
+    def save_colours(self, path=C.COLOURS_FILE):
+        data = {"ai": self.carriage_ranges, "p1": self.p1_ranges, "ball": self.ball_ranges}
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    def load_colours(self, path=C.COLOURS_FILE):
+        """Use the colours taught last time, if any. Returns True if loaded."""
+        try:
+            with open(path) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return False
+        as_ranges = lambda r: [(tuple(lo), tuple(hi)) for lo, hi in r]   # noqa: E731
+        if d.get("ai"):
+            self.carriage_ranges = as_ranges(d["ai"])
+        if d.get("p1"):
+            self.p1_ranges = as_ranges(d["p1"])
+        if "ball" in d:
+            self.ball_ranges = as_ranges(d["ball"]) if d["ball"] else None
+        return True
 
     def _color_mask(self, hsv, ranges):
         mask = np.zeros(hsv.shape[:2], np.uint8)

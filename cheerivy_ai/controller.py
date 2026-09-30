@@ -117,6 +117,8 @@ class Controller:
                 self._move_from = None
             err = self.target - carriage_x
             band = C.DEADBAND_CM if self.moving != "S" else C.DEADBAND_CM + C.HYSTERESIS_CM
+            if x_hit is not None and self.moving == "S":
+                band = max(band, C.SHOT_OK_CM)         # already on the plate: stay, don't fine-tune
             cmd = "S" if abs(err) < band else ("R" if err > 0 else "L")
             if (cmd == "R" and carriage_x >= self.rail_hi - 0.3) or (cmd == "L" and carriage_x <= self.rail_lo + 0.3):
                 cmd = "S"                               # already at that end of the rail

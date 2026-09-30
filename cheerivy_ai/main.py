@@ -180,6 +180,8 @@ def main():
             return
 
     tracker, pred, ctrl = Tracker(cal.arena), Predictor(cal.arena), Controller()
+    if not args.sim and tracker.load_colours():
+        print(f"[tracker] using the colours taught last time ({C.COLOURS_FILE})")
     # AI vs AI: a second AI for player 1's carriage. It sees the board mirrored (its own end on top),
     # so it's exactly the same predictor + controller as the AI side's.
     aivai = False
@@ -201,6 +203,7 @@ def main():
 
     mouse_ready = False
     last_seq, fps, t_prev = -1, 0.0, time.time()
+    last_off = (0.0, 0.0)
     zone_fired = {1: 0.0, 2: 0.0}
 
     show, show_win, show_seq, show_phase = None, "CHEERIVY LIVE", -1, None
@@ -251,6 +254,19 @@ def main():
             flat = cal.warp(frame)
             flat_clean = flat.copy() if (show or live) else None
             ball, carriage_x, p1_x = tracker.process(flat)
+            # the tape the camera follows -> the striker (Settings > Camera & AI > Striker offset; 0 = none)
+            off = (live.flow.settings["off_ai"], live.flow.settings["off_p1"]) if live else \
+                (C.STRIKER_OFFSET_AI_CM, C.STRIKER_OFFSET_P1_CM)
+            if off != last_off:                     # the rail limits move with it
+                for c, d in ((ctrl, off[0] - last_off[0]), (ctrl1, off[1] - last_off[1])):
+                    c.rail_lo, c.rail_hi = c.rail_lo + d, c.rail_hi + d
+                last_off = off
+            if live:                                # Settings > AI aim tolerance
+                C.SHOT_OK_CM = live.flow.settings["aim_ok"]
+            if carriage_x is not None:
+                carriage_x += off[0]
+            if p1_x is not None:
+                p1_x += off[1]
             if ball:
                 pred.update(stamp, *ball)
             elif pred.hist and stamp - pred.hist[-1][0] > 0.25:
@@ -273,13 +289,17 @@ def main():
                     ctrl.set_difficulty(live.difficulty)
                     ctrl1.set_difficulty(live.difficulty)
                 paused = not live.ai_plays()
-                for what, x, y in live.take_samples():  # Settings > Re-teach colours: clicks on the page
+                samples = live.take_samples()
+                for what, x, y in samples:              # Settings > Re-teach colours: clicks on the page
                     sample = tracker.sample_carriage if what == "carriage" else tracker.sample_ball
-                    live.notice(sample(flat_clean, x, y))
+                    live.notice(sample(flat_clean, x, y) or "")
+                if samples and not args.sim:
+                    tracker.save_colours()              # kept for next time
                 if live.want_recalibrate and not args.sim:
                     live.want_recalibrate = False
                     cal = web_calibration(source, live) or cal
                     tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
+                    tracker.load_colours()
                     pred1 = Predictor(mirrored(cal.arena))
                     tracker.find_p1 = aivai
                     continue
@@ -535,6 +555,7 @@ def main():
             elif k == ord("c") and not args.sim:
                 cal = (web_calibration(source, live) if live else run_calibration(source)) or cal
                 tracker, pred = Tracker(cal.arena), Predictor(cal.arena)
+                tracker.load_colours()
                 pred1 = Predictor(mirrored(cal.arena))
                 tracker.find_p1 = aivai
     finally:

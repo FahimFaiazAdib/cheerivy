@@ -16,6 +16,10 @@ BASE_W = 38.0           # measured: inner width of the straight AI baseline wall
 CARRIAGE_GAP = 38.0     # measured: AI carriage front face -> P1 carriage front face
 CARRIAGE_DEPTH = 4.0    # measured: baseline wall -> carriage front face
 CARRIAGE_W = 10.0       # measured: carriage width (left-right)
+# Where each striker sits compared with its tape's centre (cm, + = to the right in the picture). The AI
+# aims the striker, not the tape. 0 = aim the tape's centre. Set live in Settings > Camera & AI.
+STRIKER_OFFSET_AI_CM = 0.0
+STRIKER_OFFSET_P1_CM = 0.0
 ARENA_H = CARRIAGE_GAP + 2 * CARRIAGE_DEPTH   # baseline to baseline
 CHAMFER_DX = 0.0        # the board is a plain rectangle now (was 9.0 on the old octagon board)
 CHAMFER_DY = 0.0        # (was 10.0)
@@ -89,6 +93,8 @@ SIM_SLOPE = (-6.0, 6.0)    # simulator only: (AI half, P1 half); sheet under the
 
 # ---------------------------------------------------------------- control
 DEADBAND_CM = 1.5       # stop when |target - carriage| below this
+SHOT_OK_CM = 3.0        # a shot coming: if it will land within this of the striker's centre, don't move
+                        # (the plate is 10 cm wide; chasing the exact centre only makes it late)
 IDLE_ZONE_CM = 8.0      # no shot coming: stay put anywhere within this of the middle (else come back to its edge)
 HYSTERESIS_CM = 1.0     # extra margin before starting to move again
 MOTOR_SPEED_CM_S = 30.0 # first guess of the carriage speed; the AI measures the real one while playing
@@ -121,3 +127,4 @@ DEFAULT_DIFFICULTY = 2
 # ---------------------------------------------------------------- serial
 BAUD = 9600
 CALIB_FILE = "calib.json"
+COLOURS_FILE = "colours.json"   # the colours taught in Settings > Re-teach colours
